@@ -423,6 +423,30 @@ mod tests {
     }
 
     #[test]
+    fn iter_mut_modify() {
+        let mut vec = ArenaVec::default();
+        vec.push(0);
+        vec.push(1);
+        vec.push(2);
+
+        let iter = vec.iter_mut();
+        let mut iter = iter.map(|num| {
+            *num += 1;
+            num
+        });
+        assert_eq!(iter.next(), Some(&mut 1));
+        assert_eq!(iter.next(), Some(&mut 2));
+        assert_eq!(iter.next(), Some(&mut 3));
+        assert_eq!(iter.next(), None);
+
+        drop(iter);
+        assert_eq!(*vec.get(0).unwrap(), 1);
+        assert_eq!(*vec.get(1).unwrap(), 2);
+        assert_eq!(*vec.get(2).unwrap(), 3);
+        assert_eq!(vec.get(3), None);
+    }
+
+    #[test]
     fn basic_into_iter() {
         let vec = ArenaVec::default();
         vec.push(0);
