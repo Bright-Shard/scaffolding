@@ -225,6 +225,27 @@ impl<T> ArenaVec<T> {
     pub fn buf_ptr_mut(&mut self) -> *mut T {
         self.buffer
     }
+
+    pub fn iter(&self) -> Iter<T> {
+        Iter {
+            arena_vec: self,
+            idx: 0,
+        }
+    }
+
+    pub fn iter_mut<'a>(&'a mut self) -> IterMut<'a, T> {
+        IterMut {
+            arena_vec: self,
+            idx: 0,
+        }
+    }
+
+    pub fn into_iter(self) -> IntoIter<T> {
+        IntoIter {
+            arena_vec: self,
+            idx: 0,
+        }
+    }
 }
 impl<T> Default for ArenaVec<T> {
     fn default() -> Self {
@@ -289,12 +310,12 @@ impl<'a, T> Iterator for Iter<'a, T> {
     }
 }
 
-pub struct Itermut<'a, T> {
+pub struct IterMut<'a, T> {
     arena_vec: &'a mut ArenaVec<T>,
     idx: usize,
 }
 
-impl<'a, T> Iterator for Itermut<'a, T> {
+impl<'a, T> Iterator for IterMut<'a, T> {
     type Item = &'a mut T;
     fn next(&mut self) -> Option<Self::Item> {
         let idx = self.idx;
