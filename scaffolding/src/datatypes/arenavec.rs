@@ -323,7 +323,7 @@ impl<'a, T> Iterator for IterMut<'a, T> {
             return None;
         }
         self.idx += 1;
-        let ptr = self.arena_vec.buf_ptr_mut();
+        let ptr = self.arena_vec.as_mut_ptr();
         Some(unsafe { ptr.add(idx).as_mut().unwrap() })
     }
 }
@@ -341,7 +341,7 @@ impl<T> Iterator for IntoIter<T> {
             return None;
         }
         self.idx += 1;
-        let ptr = self.arena_vec.buf_ptr_mut();
+        let ptr = self.arena_vec.as_mut_ptr();
         Some(unsafe { ptr.add(idx).read() })
     }
 }
