@@ -219,10 +219,10 @@ impl<T> ArenaVec<T> {
         self.reserved_memory
     }
 
-    pub fn buf_ptr(&self) -> *const T {
+    pub fn as_ptr(&self) -> *const T {
         self.buffer as *const T
     }
-    pub fn buf_ptr_mut(&mut self) -> *mut T {
+    pub fn as_mut_ptr(&mut self) -> *mut T {
         self.buffer
     }
 
@@ -342,14 +342,7 @@ impl<T> Iterator for IntoIter<T> {
         }
         self.idx += 1;
         let ptr = self.arena_vec.buf_ptr_mut();
-        Some(unsafe {
-            // We can't use normal copying functions, since T isn't guaranteed to be copy
-            // Here, we instantiate a new instance of T, and copy the bytes
-            // This should be safe because we will never read the original T again, so it's fine that we technically copied the data
-            let mut new_t = std::mem::MaybeUninit::uninit();
-            std::ptr::copy(ptr.add(idx), new_t.as_mut_ptr(), 1);
-            new_t.assume_init()
-        })
+        Some(unsafe { ptr.add(idx).read() })
     }
 }
 
