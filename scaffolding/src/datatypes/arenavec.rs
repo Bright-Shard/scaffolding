@@ -218,6 +218,13 @@ impl<T> ArenaVec<T> {
     pub fn reserved_memory(&self) -> usize {
         self.reserved_memory
     }
+
+    pub fn buf_ptr(&self) -> *const T {
+        self.buffer as *const T
+    }
+    pub fn buf_ptr_mut(&mut self) -> *mut T {
+        self.buffer
+    }
 }
 impl<T> Default for ArenaVec<T> {
     fn default() -> Self {
@@ -266,6 +273,62 @@ impl<'a, T> Iterator for Drain<'a, T> {
 impl<'a, T> Drop for Drain<'a, T> {
     fn drop(&mut self) {
         self.arena_vec.len = 0;
+    }
+}
+
+pub struct Iter<'a, T> {
+    arena_vec: &'a ArenaVec<T>,
+    idx: usize,
+}
+
+impl<'a, T> Iterator for Iter<'a, T> {
+    type Item = &'a T;
+    fn next(&mut self) -> Option<Self::Item> {
+        self.idx += 1;
+        self.arena_vec.get(self.idx - 1)
+    }
+}
+
+pub struct Itermut<'a, T> {
+    arena_vec: &'a mut ArenaVec<T>,
+    idx: usize,
+}
+
+impl<'a, T> Iterator for Itermut<'a, T> {
+    type Item = &'a mut T;
+    fn next(&mut self) -> Option<Self::Item> {
+        let idx = self.idx;
+        if idx >= self.arena_vec.len() {
+            return None;
+        }
+        self.idx += 1;
+        let ptr = self.arena_vec.buf_ptr_mut();
+        Some(unsafe { ptr.add(idx).as_mut().unwrap() })
+    }
+}
+
+pub struct IntoIter<T> {
+    arena_vec: ArenaVec<T>,
+    idx: usize,
+}
+
+impl<T> Iterator for IntoIter<T> {
+    type Item = T;
+    fn next(&mut self) -> Option<Self::Item> {
+        let idx = self.idx;
+        if idx >= self.arena_vec.len() {
+            return None;
+        }
+        self.idx += 1;
+        let ptr = self.arena_vec.buf_ptr_mut();
+        Some(unsafe {
+            // We can't use normal copying functions, since T isn't guaranteed to be copy
+            // Here, we instantiate a new instance of T, and copy the bytes
+            // This should be safe because we will never read the original T again, so it's fine that we technically copied the data
+            let mut new_t = std::mem::MaybeUninit::uninit();
+            std::ptr::copy(ptr.add(idx), new_t.as_mut_ptr(), 1);
+            new_t.assume_init()
+        })
     }
 }
 
