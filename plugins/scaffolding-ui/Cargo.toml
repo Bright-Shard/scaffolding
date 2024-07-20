@@ -1,0 +1,12 @@
+[package]
+name = "scaffolding-ui"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies.scaffolding]
+workspace = true
+default-features = false
+features = []
+
+[target.'cfg(os = "macos")'.dependencies]
+objective-rust.path = "../../../objective-rust"

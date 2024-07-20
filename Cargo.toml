@@ -1,0 +1,7 @@
+[workspace]
+members = ["plugins/scaffolding-ui", "scaffolding", "benchmarks"]
+resolver = "2"
+
+[workspace.dependencies]
+scaffolding = { path = "scaffolding", default-features = false, features = [] }
+scaffolding-ui.path = "plugins/scaffolding-ui"

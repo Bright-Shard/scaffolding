@@ -1,0 +1,3 @@
+baseURL = 'https://scaffolding.brightshard.dev/'
+languageCode = 'en-us'
+title = 'Scaffolding'
