@@ -3,7 +3,7 @@
 use {
     crate::{
         os::{Os, OsMetadata, OsTrait},
-        utils::{self, MemoryAmount},
+        utils::MemoryAmount,
     },
     core::{
         mem,
@@ -56,8 +56,11 @@ pub struct ArenaVec<T> {
     capacity: usize,
     /// The number of entries in the arenavec.
     len: usize,
-    /// A pointer to the base of the memory buffer storing all the arenavec's items.
-    buffer: NonNull<T>,
+    /// A pointer to the base of the memory buffer storing all the arenavec's
+    /// items.
+    // TODO: Swap this pointer out for a `NonNull` once `nonnull_convenience`
+    // is stabilised
+    buffer: *mut T,
 }
 impl<T> ArenaVec<T> {
     /// This is the default amount of memory an arenavec will reserve when it's
@@ -105,9 +108,7 @@ impl<T> ArenaVec<T> {
         crate::init();
 
         let reserved_memory = unsafe { OsMetadata::global_unchecked().page_align(reserved_memory) };
-        let buffer = Os::reserve(reserved_memory).unwrap();
-        let buffer_aligned = utils::align(buffer.as_ptr() as usize, mem::align_of::<T>());
-        let buffer = unsafe { NonNull::new_unchecked(buffer_aligned as *mut T) };
+        let buffer = Os::reserve(reserved_memory).unwrap().as_ptr().cast::<T>();
 
         Self {
             reserved_memory,
@@ -138,7 +139,8 @@ impl<T> ArenaVec<T> {
                 panic!("ArenaVec needed to grow, but ran out of reserved memory");
             }
 
-            let region_to_allocate = unsafe { self.buffer.byte_add(self.capacity) };
+            let region_to_allocate =
+                unsafe { NonNull::new_unchecked(self.buffer.byte_add(self.capacity)) };
             unsafe { Os::commit(region_to_allocate.cast(), growth_amount) };
 
             unsafe {
@@ -155,14 +157,14 @@ impl<T> ArenaVec<T> {
 
     pub fn get(&self, idx: usize) -> Option<&T> {
         if idx < self.len {
-            Some(unsafe { self.buffer.add(idx).as_ref() })
+            Some(unsafe { &*self.buffer.add(idx) })
         } else {
             None
         }
     }
     pub fn get_mut(&mut self, idx: usize) -> Option<&mut T> {
         if idx < self.len {
-            Some(unsafe { self.buffer.add(idx).as_mut() })
+            Some(unsafe { &mut *self.buffer.add(idx) })
         } else {
             None
         }
@@ -175,7 +177,7 @@ impl<T> ArenaVec<T> {
             let val = unsafe { ptr.read() };
 
             unsafe {
-                ptr::copy(ptr.add(1).as_ptr(), ptr.as_ptr(), self.len - idx - 1);
+                ptr::copy(ptr.add(1), ptr, self.len - idx - 1);
             }
 
             self.len -= 1;
@@ -225,14 +227,15 @@ impl<T> Default for ArenaVec<T> {
 impl<T> Drop for ArenaVec<T> {
     fn drop(&mut self) {
         unsafe {
-            Os::decommit(self.buffer.cast(), self.capacity);
-            Os::dereserve(self.buffer.cast(), self.reserved_memory);
+            let buffer = NonNull::new_unchecked(self.buffer);
+            Os::decommit(buffer.cast(), self.capacity);
+            Os::dereserve(buffer.cast(), self.reserved_memory);
         }
     }
 }
 impl<T: Clone> Clone for ArenaVec<T> {
     fn clone(&self) -> Self {
-        let new_vec =
+        let new_vec: ArenaVec<T> =
             ArenaVec::with_reserved_memory_and_capacity(self.reserved_memory, self.capacity());
         unsafe { new_vec.buffer.copy_from(self.buffer, self.len()) };
 

@@ -99,12 +99,16 @@ impl TypeMap {
         mem::swap(&mut self.entries, &mut entries);
         mem::swap(&mut self.storage, &mut storage);
 
-        // `entries` and `storage` now contain the old entries because of the swap above
+        // `entries` and `storage` now contain the old entries because of the
+        // swap above
         let old_storage_address = storage.as_ptr() as isize;
         let new_storage_address = self.storage.as_ptr() as isize;
-        // Technically could overflow if the two addresses were more than half of the virtual address space apart, but this seems
-        // extremely unlikely
-        for mut entry in Box::into_iter(entries).flatten() {
+        // Technically could overflow if the two addresses were more than half
+        // of the virtual address space apart, but this is impossible since
+        // pointers don't use all 64 bits
+        // TODO: Use `Box::into_iter` when it's added to stable... currently
+        // it's only in nightly
+        for mut entry in Vec::from(entries).into_iter().flatten() {
             entry.ptr =
                 (new_storage_address + (entry.ptr as isize - old_storage_address)) as *mut u8;
             self.copy_entry(entry);

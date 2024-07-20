@@ -129,8 +129,8 @@ pub fn align(value: usize, to: usize) -> usize {
 pub struct ScaffoldingBox<T: ?Sized>(NonNull<T>);
 impl<T: Sized> ScaffoldingBox<T> {
     pub fn new(val: T) -> Self {
-        let ptr = Os::allocate(Layout::new::<T>()).unwrap().cast();
-        unsafe { ptr.write(val) };
+        let ptr: NonNull<T> = Os::allocate(Layout::new::<T>()).unwrap().cast();
+        unsafe { ptr.as_ptr().write(val) };
 
         Self(ptr)
     }
