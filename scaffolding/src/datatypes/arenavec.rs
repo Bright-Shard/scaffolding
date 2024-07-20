@@ -6,10 +6,21 @@ use {
         utils::MemoryAmount,
     },
     core::{
-        mem,
+        borrow::{Borrow, BorrowMut},
+        mem::{self, needs_drop, MaybeUninit},
+        ops::{Bound, Deref, DerefMut, Range, RangeBounds},
         ptr::{self, addr_of, NonNull},
     },
 };
+
+/// Represents possible errors that vec functions can return
+#[derive(Debug)]
+pub enum Error {
+    OutOfMemoryAddresses,
+    IndexOutOfBounds,
+}
+
+pub type Result<T> = std::result::Result<T, Error>;
 
 /// A vector backed by an arena allocator. Arenavecs never reallocate, meaning pushing to an
 /// arenavec is guaranteed to never move its items in memory. This unique property allows an
@@ -118,7 +129,7 @@ impl<T> ArenaVec<T> {
         }
     }
 
-    pub fn push(&self, val: T) {
+    pub fn push(&self, val: T) -> Result<()> {
         if self.len + 1 > self.capacity {
             let used_memory = mem::size_of::<T>() * self.len;
 
@@ -136,7 +147,8 @@ impl<T> ArenaVec<T> {
 
             if used_memory + growth_amount > self.reserved_memory {
                 // rip bozo
-                panic!("ArenaVec needed to grow, but ran out of reserved memory");
+                // panic!("ArenaVec needed to grow, but ran out of reserved memory");
+                return Err(Error::OutOfMemoryAddresses);
             }
 
             let region_to_allocate =
@@ -152,6 +164,16 @@ impl<T> ArenaVec<T> {
             let ptr = self.buffer.add(self.len);
             ptr.write(val);
             *addr_of!(self.len).cast_mut() += 1;
+        }
+        Ok(())
+    }
+
+    pub fn pop(&mut self) -> Option<T> {
+        if self.is_empty() {
+            None
+        } else {
+            self.len -= 1;
+            Some(unsafe { self.as_mut_ptr().add(self.len() + 1).read() })
         }
     }
 
@@ -219,6 +241,11 @@ impl<T> ArenaVec<T> {
         self.reserved_memory
     }
 
+    /// This function returns the count of Ts that can be pushed before the vector runs out of memory
+    pub fn remaining_space(&self) -> usize {
+        self.reserved_memory().div_ceil(std::mem::size_of::<T>()) - self.len()
+    }
+
     pub fn as_ptr(&self) -> *const T {
         self.buffer as *const T
     }
@@ -246,6 +273,222 @@ impl<T> ArenaVec<T> {
             idx: 0,
         }
     }
+
+    pub fn as_slice(&self) -> &[T] {
+        unsafe { std::slice::from_raw_parts(self.buffer as *const T, self.len) }
+    }
+    pub fn as_mut_slice(&mut self) -> &mut [T] {
+        unsafe { std::slice::from_raw_parts_mut(self.buffer, self.len) }
+    }
+    // This isn't using the trait because it can fail
+    pub fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) -> Result<()> {
+        let mut iter = iter.into_iter();
+        // There's not enough space to fit the whole iterator in
+        if iter.size_hint().0 > self.remaining_space() {
+            Err(Error::OutOfMemoryAddresses)
+        }
+        // If this function errors out due to not enough memory addresses, it will have filled up its entire capacity
+        // We may want to have it stay the same as it was before if it errors out
+        // But we can change that later
+        else {
+            while let Some(val) = iter.next() {
+                self.push(val)?;
+            }
+            Ok(())
+        }
+    }
+
+    pub fn append(&mut self, other: &mut ArenaVec<T>) -> Result<()> {
+        if self.remaining_space() < other.len() {
+            Err(Error::OutOfMemoryAddresses)
+        } else {
+            unsafe { std::ptr::copy(other.as_ptr(), self.as_mut_ptr(), other.len()) };
+            // Should we zero out the other vecs memory?
+            other.clear();
+            Ok(())
+        }
+    }
+
+    pub fn dedup(&mut self)
+    where
+        T: PartialEq,
+    {
+        // First, tag all duplicates
+        // Arenavec?
+        let mut duplicate_idxs = Vec::new();
+        for idx in 0..(self.len() - 1) {
+            if self.get(idx).unwrap().eq(&self.get(idx + 1).unwrap()) {
+                duplicate_idxs.push(idx + 1);
+            }
+        }
+        // memcpy contiguous memory regions down the vec
+        let mut bgn = 0;
+        let mut region_iter = duplicate_idxs.iter().map(|idx| {
+            let region = bgn..*idx;
+            bgn = idx + 1;
+            region
+        });
+        // There is guaranteed to be at least one contiguous region
+        let mut base_range = region_iter.next().unwrap();
+        region_iter.for_each(|r| {
+            unsafe {
+                ptr::copy(
+                    self.get(r.start).unwrap(),
+                    self.get_mut(base_range.end).unwrap(),
+                    r.len(),
+                );
+            }
+            base_range = r;
+        });
+    }
+
+    pub fn dedup_by<F>(&mut self, mut same_bucket: F)
+    where
+        T: PartialEq,
+        F: FnMut(&mut T, &mut T) -> bool,
+    {
+        // First, tag all duplicates
+        // Arenavec?
+        let mut duplicate_idxs = Vec::new();
+        // the iteration here has to be a little weird, because guarantees we make about eq types are no longer relavent here
+        // if we have elements a, b, and c, and a ~= b, and a ~= c, this doesn't necessarily mean that b ~= c
+        // Because the spec says that we compare two items with the func and remove the second one (although it's first in the function call),
+        // We have to keep calling with the last element that flagged the function
+        // e.g, we have to call f(b, a), and if that returns true, we then have to call f(c, a)
+        // This means we have to keep track of indices
+        // :(
+        let mut base_idx = 0;
+        for idx in 1..self.len() {
+            // This is safe since idx is guaranteed to not equal base_idx
+            let a = self.get_mut(idx).unwrap() as *mut T;
+            let b = self.get_mut(base_idx).unwrap() as *mut T;
+            if same_bucket(unsafe { a.as_mut().unwrap() }, unsafe {
+                b.as_mut().unwrap()
+            }) {
+                duplicate_idxs.push(idx);
+            } else {
+                base_idx = idx;
+            }
+        }
+        // memcpy contiguous memory regions down the vec
+        let mut bgn = 0;
+        let mut region_iter = duplicate_idxs.iter().map(|idx| {
+            let region = bgn..*idx;
+            bgn = idx + 1;
+            region
+        });
+        // There is guaranteed to be at least one contiguous region
+        let mut base_range = region_iter.next().unwrap();
+        region_iter.for_each(|r| {
+            unsafe {
+                ptr::copy(
+                    self.get(r.start).unwrap(),
+                    self.get_mut(base_range.end).unwrap(),
+                    r.len(),
+                );
+            }
+            base_range = r;
+        });
+    }
+
+    pub fn split_off(&mut self, at: usize) -> Result<ArenaVec<T>> {
+        if at > self.len() {
+            return Err(Error::IndexOutOfBounds);
+        }
+        let mut other = ArenaVec::with_capacity(self.len() - at);
+        if at == self.len() {
+            return Ok(other);
+        }
+        unsafe {
+            ptr::copy(self.as_ptr().add(at), other.as_mut_ptr(), self.len() - at);
+        }
+        self.len = at;
+        Ok(other)
+    }
+
+    pub fn truncate(&mut self, new_len: usize) -> Result<()> {
+        if new_len > self.len() {
+            return Err(Error::IndexOutOfBounds);
+        }
+        // There's definitely a better way to do this, but this is fine for now
+        while self.len() > new_len {
+            self.pop().unwrap();
+        }
+        Ok(())
+    }
+
+    pub fn resize_with<F>(&mut self, new_len: usize, mut f: F) -> Result<()>
+    where
+        F: FnMut() -> T,
+    {
+        if new_len < self.len() {
+            self.truncate(new_len)
+        } else if new_len == self.len() {
+            Ok(())
+        } else {
+            while self.len() < new_len {
+                self.push(f())?;
+            }
+            Ok(())
+        }
+    }
+
+    pub fn leak<'a>(mut self) -> &'a mut [T] {
+        // This is just a guess at how this should work
+        let slice: &mut [T] = self.as_mut_slice();
+        // This for sure sucks
+        unsafe { mem::transmute::<&mut [T], &'a mut [T]>(slice) }
+    }
+
+    pub fn spare_capacity_mut(&mut self) -> &mut [MaybeUninit<T>] {
+        unsafe {
+            std::slice::from_raw_parts_mut(
+                self.as_mut_ptr().add(self.len) as *mut MaybeUninit<T>,
+                self.capacity - self.len,
+            )
+        }
+    }
+
+    pub fn resize(&mut self, new_len: usize, value: T) -> Result<()>
+    where
+        T: Clone,
+    {
+        // Inefficient, but it works
+        let f = || value.clone();
+        self.resize_with(new_len, f)
+    }
+
+    pub fn extend_from_slice(&mut self, other: &[T]) -> Result<()>
+    where
+        T: Clone,
+    {
+        // Inefficient, but it works
+        for val in other {
+            self.push(val.clone())?;
+        }
+        Ok(())
+    }
+
+    pub fn extend_from_within<R>(&mut self, src: R) -> Result<()>
+    where
+        R: RangeBounds<usize>,
+        T: Clone,
+    {
+        let range = (match src.start_bound() {
+            Bound::Included(i) => *i,
+            Bound::Excluded(i) => *i + 1,
+            Bound::Unbounded => 0,
+        })..(match src.end_bound() {
+            Bound::Included(i) => *i + 1,
+            Bound::Excluded(i) => *i,
+            Bound::Unbounded => self.len(),
+        });
+        for idx in range {
+            let val = unsafe { self.as_ptr().add(idx).read().clone() };
+            self.push(val)?;
+        }
+        Ok(())
+    }
 }
 impl<T> Default for ArenaVec<T> {
     fn default() -> Self {
@@ -268,6 +511,52 @@ impl<T: Clone> Clone for ArenaVec<T> {
         unsafe { new_vec.buffer.copy_from(self.buffer, self.len()) };
 
         new_vec
+    }
+}
+impl<T> AsRef<[T]> for ArenaVec<T> {
+    fn as_ref(&self) -> &[T] {
+        self.as_slice()
+    }
+}
+impl<T> AsMut<[T]> for ArenaVec<T> {
+    fn as_mut(&mut self) -> &mut [T] {
+        self.as_mut_slice()
+    }
+}
+impl<T> Borrow<[T]> for ArenaVec<T> {
+    fn borrow(&self) -> &[T] {
+        self.as_slice()
+    }
+}
+impl<T> BorrowMut<[T]> for ArenaVec<T> {
+    fn borrow_mut(&mut self) -> &mut [T] {
+        self.as_mut_slice()
+    }
+}
+impl<T> Deref for ArenaVec<T> {
+    type Target = [T];
+    fn deref(&self) -> &Self::Target {
+        self.as_slice()
+    }
+}
+impl<T> DerefMut for ArenaVec<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.as_mut_slice()
+    }
+}
+// I'm not implementing Extend right now, because I don't know if we want falliable APIs like that in the struct
+impl<T: Clone> From<&[T]> for ArenaVec<T> {
+    fn from(value: &[T]) -> Self {
+        let mut v = Self::with_capacity(value.len());
+        v.extend(value.iter().map(|t| t.clone())).unwrap();
+        v
+    }
+}
+impl<T: Clone, const N: usize> From<&[T; N]> for ArenaVec<T> {
+    fn from(value: &[T; N]) -> Self {
+        let mut v = Self::with_capacity(N);
+        v.extend(value.iter().map(|t| t.clone())).unwrap();
+        v
     }
 }
 
