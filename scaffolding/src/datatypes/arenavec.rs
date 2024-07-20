@@ -218,6 +218,34 @@ impl<T> ArenaVec<T> {
     pub fn reserved_memory(&self) -> usize {
         self.reserved_memory
     }
+
+    pub fn as_ptr(&self) -> *const T {
+        self.buffer as *const T
+    }
+    pub fn as_mut_ptr(&mut self) -> *mut T {
+        self.buffer
+    }
+
+    pub fn iter(&self) -> Iter<T> {
+        Iter {
+            arena_vec: self,
+            idx: 0,
+        }
+    }
+
+    pub fn iter_mut<'a>(&'a mut self) -> IterMut<'a, T> {
+        IterMut {
+            arena_vec: self,
+            idx: 0,
+        }
+    }
+
+    pub fn into_iter(self) -> IntoIter<T> {
+        IntoIter {
+            arena_vec: self,
+            idx: 0,
+        }
+    }
 }
 impl<T> Default for ArenaVec<T> {
     fn default() -> Self {
@@ -269,6 +297,55 @@ impl<'a, T> Drop for Drain<'a, T> {
     }
 }
 
+pub struct Iter<'a, T> {
+    arena_vec: &'a ArenaVec<T>,
+    idx: usize,
+}
+
+impl<'a, T> Iterator for Iter<'a, T> {
+    type Item = &'a T;
+    fn next(&mut self) -> Option<Self::Item> {
+        self.idx += 1;
+        self.arena_vec.get(self.idx - 1)
+    }
+}
+
+pub struct IterMut<'a, T> {
+    arena_vec: &'a mut ArenaVec<T>,
+    idx: usize,
+}
+
+impl<'a, T> Iterator for IterMut<'a, T> {
+    type Item = &'a mut T;
+    fn next(&mut self) -> Option<Self::Item> {
+        let idx = self.idx;
+        if idx >= self.arena_vec.len() {
+            return None;
+        }
+        self.idx += 1;
+        let ptr = self.arena_vec.buf_ptr_mut();
+        Some(unsafe { ptr.add(idx).as_mut().unwrap() })
+    }
+}
+
+pub struct IntoIter<T> {
+    arena_vec: ArenaVec<T>,
+    idx: usize,
+}
+
+impl<T> Iterator for IntoIter<T> {
+    type Item = T;
+    fn next(&mut self) -> Option<Self::Item> {
+        let idx = self.idx;
+        if idx >= self.arena_vec.len() {
+            return None;
+        }
+        self.idx += 1;
+        let ptr = self.arena_vec.buf_ptr_mut();
+        Some(unsafe { ptr.add(idx).read() })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::ArenaVec;
@@ -296,5 +373,83 @@ mod tests {
         assert_eq!(*vec.get(0).unwrap(), 0);
         assert_eq!(*vec.get(1).unwrap(), 2);
         assert_eq!(vec.get(2), None);
+    }
+
+    #[test]
+    fn basic_iter() {
+        let vec = ArenaVec::default();
+        vec.push(0);
+        vec.push(1);
+        vec.push(2);
+
+        let mut iter = vec.iter();
+        assert_eq!(iter.next(), Some(&0));
+        assert_eq!(iter.next(), Some(&1));
+        assert_eq!(iter.next(), Some(&2));
+        assert_eq!(iter.next(), None);
+
+        drop(iter);
+        assert_eq!(*vec.get(0).unwrap(), 0);
+        assert_eq!(*vec.get(1).unwrap(), 1);
+        assert_eq!(*vec.get(2).unwrap(), 2);
+        assert_eq!(vec.get(3), None);
+    }
+
+    #[test]
+    fn basic_iter_mut() {
+        let mut vec = ArenaVec::default();
+        vec.push(0);
+        vec.push(1);
+        vec.push(2);
+
+        let mut iter = vec.iter_mut();
+        assert_eq!(iter.next(), Some(&mut 0));
+        assert_eq!(iter.next(), Some(&mut 1));
+        assert_eq!(iter.next(), Some(&mut 2));
+        assert_eq!(iter.next(), None);
+
+        drop(iter);
+        assert_eq!(*vec.get(0).unwrap(), 0);
+        assert_eq!(*vec.get(1).unwrap(), 1);
+        assert_eq!(*vec.get(2).unwrap(), 2);
+        assert_eq!(vec.get(3), None);
+    }
+
+    #[test]
+    fn iter_mut_modify() {
+        let mut vec = ArenaVec::default();
+        vec.push(0);
+        vec.push(1);
+        vec.push(2);
+
+        let iter = vec.iter_mut();
+        let mut iter = iter.map(|num| {
+            *num += 1;
+            num
+        });
+        assert_eq!(iter.next(), Some(&mut 1));
+        assert_eq!(iter.next(), Some(&mut 2));
+        assert_eq!(iter.next(), Some(&mut 3));
+        assert_eq!(iter.next(), None);
+
+        drop(iter);
+        assert_eq!(*vec.get(0).unwrap(), 1);
+        assert_eq!(*vec.get(1).unwrap(), 2);
+        assert_eq!(*vec.get(2).unwrap(), 3);
+        assert_eq!(vec.get(3), None);
+    }
+
+    #[test]
+    fn basic_into_iter() {
+        let vec = ArenaVec::default();
+        vec.push(0);
+        vec.push(1);
+        vec.push(2);
+
+        let mut iter = vec.into_iter();
+        assert_eq!(iter.next(), Some(0));
+        assert_eq!(iter.next(), Some(1));
+        assert_eq!(iter.next(), Some(2));
+        assert_eq!(iter.next(), None);
     }
 }
