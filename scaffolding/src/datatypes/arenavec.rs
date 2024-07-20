@@ -381,4 +381,58 @@ mod tests {
         assert_eq!(*vec.get(1).unwrap(), 2);
         assert_eq!(vec.get(2), None);
     }
+
+    #[test]
+    fn basic_iter() {
+        let vec = ArenaVec::default();
+        vec.push(0);
+        vec.push(1);
+        vec.push(2);
+
+        let mut iter = vec.iter();
+        assert_eq!(iter.next(), Some(&0));
+        assert_eq!(iter.next(), Some(&1));
+        assert_eq!(iter.next(), Some(&2));
+        assert_eq!(iter.next(), None);
+
+        drop(iter);
+        assert_eq!(*vec.get(0).unwrap(), 0);
+        assert_eq!(*vec.get(1).unwrap(), 1);
+        assert_eq!(*vec.get(2).unwrap(), 2);
+        assert_eq!(vec.get(3), None);
+    }
+
+    #[test]
+    fn basic_iter_mut() {
+        let mut vec = ArenaVec::default();
+        vec.push(0);
+        vec.push(1);
+        vec.push(2);
+
+        let mut iter = vec.iter_mut();
+        assert_eq!(iter.next(), Some(&mut 0));
+        assert_eq!(iter.next(), Some(&mut 1));
+        assert_eq!(iter.next(), Some(&mut 2));
+        assert_eq!(iter.next(), None);
+
+        drop(iter);
+        assert_eq!(*vec.get(0).unwrap(), 0);
+        assert_eq!(*vec.get(1).unwrap(), 1);
+        assert_eq!(*vec.get(2).unwrap(), 2);
+        assert_eq!(vec.get(3), None);
+    }
+
+    #[test]
+    fn basic_into_iter() {
+        let vec = ArenaVec::default();
+        vec.push(0);
+        vec.push(1);
+        vec.push(2);
+
+        let mut iter = vec.into_iter();
+        assert_eq!(iter.next(), Some(0));
+        assert_eq!(iter.next(), Some(1));
+        assert_eq!(iter.next(), Some(2));
+        assert_eq!(iter.next(), None);
+    }
 }
