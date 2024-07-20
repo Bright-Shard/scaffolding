@@ -8,5 +8,5 @@ workspace = true
 default-features = false
 features = []
 
-[target.'cfg(os = "macos")'.dependencies]
-objective-rust.path = "../../../objective-rust"
+#[target.'cfg(os = "macos")'.dependencies]
+#objective-rust.path = "../../../objective-rust"
