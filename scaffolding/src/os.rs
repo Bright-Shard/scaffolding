@@ -20,7 +20,7 @@ pub trait OsTrait {
 
     /// Reserve `amount` bytes of virtual memory. This shouldn't allocate
     /// an memory, but instead just reserve virtual addresses to be
-    /// allocated later with [`OsUtilsTrait::commit`].
+    /// allocated later with [`OsTrait::commit`].
     ///
     /// Note that, unlike [`OsTrait::allocate`], the reserved memory may not be
     /// properly aligned for a specific type. You are responsible for alignment.
@@ -29,29 +29,29 @@ pub trait OsTrait {
     ///
     /// # Safety
     /// `ptr` must point to a valid region of memory that was reserved with
-    /// [`OsUtilsTrait::reserve`].
+    /// [`OsTrait::reserve`].
     unsafe fn commit(ptr: NonNull<c_void>, amount: usize);
     /// Allocate memory for the given layout.
     fn allocate(layout: Layout) -> Option<NonNull<c_void>>;
 
-    /// Release memory reserved with [`OsUtilsTrait::reserve`].
+    /// Release memory reserved with [`OsTrait::reserve`].
     ///
     /// # Safety
     /// `ptr` must point to a valid region of memory that was reserved
-    /// with [`OsUtilsTrait::reserve`]. That memory should not be committed.
+    /// with [`OsTrait::reserve`]. That memory should not be committed.
     unsafe fn dereserve(ptr: NonNull<c_void>, amount: usize);
-    /// Release memory committed with [`OsUtilsTrait::commit`].
+    /// Release memory committed with [`OsTrait::commit`].
     ///
     /// # Safety
     /// `ptr` must point to a valid region of memory that was reserved
-    /// with [`OsUtilsTrait::reserve`] and then committed with
-    /// [`OsUtilsTrait::commit`].
+    /// with [`OsTrait::reserve`] and then committed with
+    /// [`OsTrait::commit`].
     unsafe fn decommit(ptr: NonNull<c_void>, amount: usize);
-    /// Release memory allocated with [`OsUtilsTrait::allocate`].
+    /// Release memory allocated with [`OsTrait::allocate`].
     ///
     /// # Safety
     /// `ptr` must point to a valid region of memory that was allocated
-    /// with [`OsUtilsTrait::allocate`]. That memory shouldn't be reserved
+    /// with [`OsTrait::allocate`]. That memory shouldn't be reserved
     /// or committed.
     unsafe fn deallocate(ptr: NonNull<c_void>, amount: usize);
 }
@@ -137,8 +137,8 @@ compile_error!("Scaffolding isn't currently supported for the operating system y
 
 /// A basic global allocator using the OS' allocate and deallocate functions.
 ///
-/// This just calls the [`OsUtilsTrait::allocate`] and
-/// [`OsUtilsTrait::deallocate`] functions.
+/// This just calls the [`OsTrait::allocate`] and
+/// [`OsTrait::deallocate`] functions.
 /// It doesn't have good functions for resizing allocations or
 /// allocating with 0s. The standard library will probably have a better
 /// global allocator than this one.
@@ -152,7 +152,7 @@ mod os_allocator {
 
     unsafe impl GlobalAlloc for Os {
         unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-            Os::allocate(layout.size()).unwrap().as_ptr().cast()
+            Os::allocate(layout).unwrap().as_ptr().cast()
         }
         unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
             Os::deallocate(NonNull::new(ptr).unwrap().cast(), layout.size());

@@ -3,18 +3,27 @@
 name: Scaffolding Tests
 on: [push, workflow_dispatch]
 jobs:
+  Documentation-Tests:
+    runs-on: ubuntu-latest
+    env:
+      RUSTDOCFLAGS: -D warnings
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Cargo Doc
+        run: cargo doc
   Linux-Tests:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
       - name: Cargo Test
-        run: cargo test -p scaffolding
+        run: cargo test --workspace
   macOS-Tests:
     runs-on: macos-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
       - name: Cargo Test
-        run: cargo test -p scaffolding
+        run: cargo test --workspace
   # TODO: Add windows tests here when windows is supported

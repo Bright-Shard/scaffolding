@@ -11,25 +11,27 @@ use {
 
 /// A storage system that allows taking temporary ownership of instances of
 /// a type `T`. Instead of borrowing `T`, and instance of `T` is temporarily
-/// moved from the [`Warehouse`], to be returned later. This is similar to [`Cell`]
-/// in the standard library, but it can store several instances of `T`.
+/// moved from the [`Warehouse`], to be returned later. This is similar to
+/// [`Cell`] in the standard library, but it can store several instances of `T`.
 ///
 /// The warehouse stores instances of `T` in an [`ArenaVec`]. You can get an
-/// instance of `T` from the warehouse with [`Warehouse::get_instance`]. If the warehouse
-/// has an instance stored, it will return that; otherwise, it will make a new
-/// instance and return that instead.
+/// instance of `T` from the warehouse with [`Warehouse::get_instance`]. If the
+/// warehouse has an instance stored, it will return that; otherwise, it will
+/// make a new instance and return that instead.
 ///
 /// Instances are returned wrapped in a [`WarehouseValue`]. This type can deref
-/// to `T`, and will automatically return itself to the [`Warehouse`] it was taken
-/// from when dropped. If you absolutely need to take ownership of the instance,
-/// you can use [`Warehouse::take_instance`] instead of [`Warehouse::get_instance`],
-/// but you will be responsible for returning the instance to the [`Warehouse`] yourself.
+/// to `T`, and will automatically return itself to the [`Warehouse`] it was
+/// taken from when dropped. If you absolutely need to take ownership of the
+/// instance, you can use [`Warehouse::take_instance`] instead of
+/// [`Warehouse::get_instance`], but you will be responsible for returning the
+/// instance to the [`Warehouse`] yourself.
 ///
-/// Because [`Warehouse`]s move values instead of borrowing them, there's no need to
-/// worry about pointers or memory safety. Thus, both [`Warehouse::get_instance`] and
-/// [`Warehouse::return_instance`] take `&self`, not `&mut self`. This allows for a very
-/// convenient way to store and reuse instances of type `T`, with the slight overhead
-/// of having to frequently move those instances.
+/// Because [`Warehouse`]s move values instead of borrowing them, there's no
+/// need to worry about pointers or memory safety. Thus, both
+/// [`Warehouse::get_instance`] and [`Warehouse::return_instance`] take
+/// `&self`, not `&mut self`. This allows for a very convenient way to store
+/// and reuse instances of type `T`, with the slight overhead of having to
+/// frequently move those instances.
 ///
 /// [`Cell`]: std::cell::Cell
 #[derive(Default)]
@@ -37,17 +39,17 @@ pub struct Warehouse<T: Default + Reset> {
     storage: UnsafeCell<ArenaVec<T>>,
 }
 impl<T: Default + Reset> Warehouse<T> {
-    /// Creates a new [`Warehouse`] backed by an [`ArenaVec`] that has the given reserved
-    /// memory.
+    /// Creates a new [`Warehouse`] backed by an [`ArenaVec`] that has the
+    /// given reserved memory.
     pub fn with_reserved_memory(reserved_memory: usize) -> Self {
         Self {
             storage: UnsafeCell::new(ArenaVec::with_reserved_memory(reserved_memory)),
         }
     }
 
-    /// Get an instance of `T` from the [`Warehouse`], or create a new instance of `T` if
-    /// the [`Warehouse`] is empty. The instance will be wrapped in a [`WarehouseValue`].
-    /// See the type-level docs for more info.
+    /// Get an instance of `T` from the [`Warehouse`], or create a new instance
+    /// of `T` if the [`Warehouse`] is empty. The instance will be wrapped in a
+    /// [`WarehouseValue`]. See the type-level docs for more info.
     pub fn get_instance(&self) -> WarehouseValue<'_, T> {
         WarehouseValue {
             val: ManuallyDrop::new(self.take_instance()),
@@ -55,17 +57,18 @@ impl<T: Default + Reset> Warehouse<T> {
         }
     }
 
-    /// Take an instance of `T` from the [`Warehouse`], or create a new instance of `T`
-    /// if the [`Warehouse`] is empty. The type won't be wrapped in a [`WarehouseValue`],
-    /// which makes you responsible for returning the type to the [`Warehouse`]. See
-    /// the type-level docs for more info.
+    /// Take an instance of `T` from the [`Warehouse`], or create a new
+    /// instance of `T` if the [`Warehouse`] is empty. The type won't be
+    /// wrapped in a [`WarehouseValue`], which makes you responsible for
+    /// returning the type to the [`Warehouse`]. See the type-level docs for
+    /// more info.
     pub fn take_instance(&self) -> T {
         let storage = unsafe { &mut *self.storage.get() };
         storage.remove(0).unwrap_or_default()
     }
 
-    /// Return a taken instance of `T` to the [`Warehouse`]. [`WarehouseValue`]s call this
-    /// method automatically when dropped.
+    /// Return a taken instance of `T` to the [`Warehouse`].
+    /// [`WarehouseValue`]s call this  method automatically when dropped.
     pub fn return_instance(&self, mut val: T) {
         let storage = unsafe { &*self.storage.get() };
         val.reset();
@@ -118,8 +121,8 @@ impl<'a, T: Default + Reset> Drop for WarehouseValue<'a, T> {
 /// to its initial state after creating it with some constructor, so that
 /// it can be reused in the future.
 ///
-/// This trait is implemented for all data structures in [`std::collections`] and
-/// [`scaffolding::exrs`].
+/// This trait is implemented for all data structures in [`std::collections`]
+/// and [`crate::datatypes`].
 pub trait Reset {
     /// Reset the type - see the [`Reset`] docs.
     fn reset(&mut self);
