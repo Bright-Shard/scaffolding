@@ -1,0 +1,20 @@
+# Runs tests for the `scaffolding` crate.
+
+name: Scaffolding Tests
+on: [push, workflow_dispatch]
+jobs:
+  Linux Tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Cargo Test
+        run: cargo test -p scaffolding
+  macOS Tests:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Cargo Test
+        run: cargo test -p scaffolding
+  # TODO: Add windows tests here when windows is supported

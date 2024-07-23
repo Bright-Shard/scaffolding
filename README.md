@@ -55,9 +55,10 @@ Scaffolding isn't very useable right now because it doesn't have a UI library. T
   - [x] ExecutableArg
     - [x] Get data from the world w/ references - have an arbitrary lifetime
     - [x] Apply mutations to the world when dropped
-  - [x] Executables
+  - [ ] Executables
     - [x] Take any argument that's `&impl ExecutableArg` or `&mut ExecutableArg`
     - [x] Apply mutations immediately or delayed
+    - [ ] Implement executable traits for tuples up to size 12 (what std uses: https://doc.rust-lang.org/std/primitive.tuple.html#trait-implementations-1) - currently only implemented for up to 5
   - [ ] Multithreading
     - [x] `execute_in_parallel` function to run a bunch of executables in parallel, then apply all their mutations when they finish
     - [ ] Multithreading datatype: Double-buffered datatype for two threads to work with

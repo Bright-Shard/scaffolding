@@ -12,6 +12,8 @@ pub mod world;
 pub mod prelude {
     //! Reexported types you'll probably need to use Scaffolding.
 
+    #[cfg(feature = "multi")]
+    pub use crate::multi::ExecuteInParallel;
     pub use crate::{
         datatypes::TypeMap,
         world::{executable_args::*, ExecutableArg, Mutation, World},
@@ -20,6 +22,8 @@ pub mod prelude {
 pub mod plugin_prelude {
     //! Reexported types you'll probably need to make a Scaffolding plugin.
 
+    #[cfg(feature = "multi")]
+    pub use crate::multi::ExecuteInParallel;
     pub use crate::{
         datatypes::{ArenaVec, StackVec, TypeMap, Warehouse},
         world::{

@@ -5,7 +5,10 @@ use {
         datatypes::TypeMap,
         world::{ExecutableArg, ImmutableWorld},
     },
-    core::ops::Deref,
+    core::{
+        fmt::{Debug, Formatter},
+        ops::Deref,
+    },
 };
 
 pub struct State<'a, T: 'static> {
@@ -27,6 +30,11 @@ impl<'a, T> Deref for State<'a, T> {
 
     fn deref(&self) -> &Self::Target {
         self.val
+    }
+}
+impl<T: Debug> Debug for State<'_, T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
+        write!(f, "State {{ val: {:?} }}", self.val)
     }
 }
 
