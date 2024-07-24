@@ -457,10 +457,7 @@ impl<T> ArenaVec<T> {
         if new_len > self.len() {
             return;
         }
-        // There's definitely a better way to do this, but this is fine for now
-        while self.len() > new_len {
-            self.pop().unwrap();
-        }
+        self.len = new_len;
     }
 
     pub fn try_resize_with<F>(&mut self, new_len: usize, mut f: F) -> Result<()>
