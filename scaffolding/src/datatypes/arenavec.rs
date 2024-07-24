@@ -129,7 +129,7 @@ impl<T> ArenaVec<T> {
         }
     }
 
-    pub fn push(&self, val: T) -> Result<()> {
+    pub fn try_push(&self, val: T) -> Result<()> {
         if self.len + 1 > self.capacity {
             let used_memory = mem::size_of::<T>() * self.len;
 
@@ -166,6 +166,43 @@ impl<T> ArenaVec<T> {
             *addr_of!(self.len).cast_mut() += 1;
         }
         Ok(())
+    }
+
+    pub fn push(&self, val: T) {
+        if self.len + 1 > self.capacity {
+            let used_memory = mem::size_of::<T>() * self.len;
+
+            // Double in size if possible, else reserve all memory
+            let growth_amount = if used_memory == 0 {
+                mem::size_of::<T>()
+            } else if used_memory * 2 < self.reserved_memory {
+                used_memory
+            } else {
+                self.reserved_memory - used_memory
+            };
+
+            // global state was loaded when the arenavec was created
+            let growth_amount = unsafe { OsMetadata::global_unchecked().page_align(growth_amount) };
+
+            if used_memory + growth_amount > self.reserved_memory {
+                // rip bozo
+                panic!("ArenaVec needed to grow, but ran out of reserved memory");
+            }
+
+            let region_to_allocate =
+                unsafe { NonNull::new_unchecked(self.buffer.byte_add(self.capacity)) };
+            unsafe { Os::commit(region_to_allocate.cast(), growth_amount) };
+
+            unsafe {
+                *addr_of!(self.capacity).cast_mut() += growth_amount;
+            }
+        }
+
+        unsafe {
+            let ptr = self.buffer.add(self.len);
+            ptr.write(val);
+            *addr_of!(self.len).cast_mut() += 1;
+        }
     }
 
     pub fn pop(&mut self) -> Option<T> {
@@ -281,7 +318,7 @@ impl<T> ArenaVec<T> {
         unsafe { std::slice::from_raw_parts_mut(self.buffer, self.len) }
     }
     // This isn't using the trait because it can fail
-    pub fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) -> Result<()> {
+    pub fn try_extend<I: IntoIterator<Item = T>>(&mut self, iter: I) -> Result<()> {
         let mut iter = iter.into_iter();
         // There's not enough space to fit the whole iterator in
         if iter.size_hint().0 > self.remaining_space() {
@@ -292,13 +329,13 @@ impl<T> ArenaVec<T> {
         // But we can change that later
         else {
             while let Some(val) = iter.next() {
-                self.push(val)?;
+                self.try_push(val)?;
             }
             Ok(())
         }
     }
 
-    pub fn append(&mut self, other: &mut ArenaVec<T>) -> Result<()> {
+    pub fn try_append(&mut self, other: &mut ArenaVec<T>) -> Result<()> {
         if self.remaining_space() < other.len() {
             Err(Error::OutOfMemoryAddresses)
         } else {
@@ -306,6 +343,16 @@ impl<T> ArenaVec<T> {
             // Should we zero out the other vecs memory?
             other.clear();
             Ok(())
+        }
+    }
+
+    pub fn append(&mut self, other: &mut ArenaVec<T>) {
+        if self.remaining_space() < other.len() {
+            panic!("ArenaVec needed to grow, but ran out of reserved memory");
+        } else {
+            unsafe { std::ptr::copy(other.as_ptr(), self.as_mut_ptr(), other.len()) };
+            // Should we zero out the other vecs memory?
+            other.clear();
         }
     }
 
@@ -406,38 +453,53 @@ impl<T> ArenaVec<T> {
         Ok(other)
     }
 
-    pub fn truncate(&mut self, new_len: usize) -> Result<()> {
+    pub fn truncate(&mut self, new_len: usize) {
         if new_len > self.len() {
-            return Err(Error::IndexOutOfBounds);
+            return;
         }
         // There's definitely a better way to do this, but this is fine for now
         while self.len() > new_len {
             self.pop().unwrap();
         }
-        Ok(())
     }
 
-    pub fn resize_with<F>(&mut self, new_len: usize, mut f: F) -> Result<()>
+    pub fn try_resize_with<F>(&mut self, new_len: usize, mut f: F) -> Result<()>
     where
         F: FnMut() -> T,
     {
         if new_len < self.len() {
-            self.truncate(new_len)
+            self.truncate(new_len);
+            Ok(())
         } else if new_len == self.len() {
             Ok(())
         } else {
             while self.len() < new_len {
-                self.push(f())?;
+                self.try_push(f())?;
             }
             Ok(())
+        }
+    }
+
+    pub fn resize_with<F>(&mut self, new_len: usize, mut f: F)
+    where
+        F: FnMut() -> T,
+    {
+        if new_len < self.len() {
+            self.truncate(new_len);
+        } else if new_len != self.len() {
+            while self.len() < new_len {
+                self.push(f());
+            }
         }
     }
 
     pub fn leak<'a>(mut self) -> &'a mut [T] {
         // This is just a guess at how this should work
         let slice: &mut [T] = self.as_mut_slice();
+        let s = unsafe { mem::transmute::<&mut [T], &'a mut [T]>(slice) };
+        mem::forget(self);
         // This for sure sucks
-        unsafe { mem::transmute::<&mut [T], &'a mut [T]>(slice) }
+        s
     }
 
     pub fn spare_capacity_mut(&mut self) -> &mut [MaybeUninit<T>] {
@@ -449,7 +511,16 @@ impl<T> ArenaVec<T> {
         }
     }
 
-    pub fn resize(&mut self, new_len: usize, value: T) -> Result<()>
+    pub fn try_resize(&mut self, new_len: usize, value: T) -> Result<()>
+    where
+        T: Clone,
+    {
+        // Inefficient, but it works
+        let f = || value.clone();
+        self.try_resize_with(new_len, f)
+    }
+
+    pub fn resize(&mut self, new_len: usize, value: T)
     where
         T: Clone,
     {
@@ -458,18 +529,28 @@ impl<T> ArenaVec<T> {
         self.resize_with(new_len, f)
     }
 
-    pub fn extend_from_slice(&mut self, other: &[T]) -> Result<()>
+    pub fn try_extend_from_slice(&mut self, other: &[T]) -> Result<()>
     where
         T: Clone,
     {
         // Inefficient, but it works
         for val in other {
-            self.push(val.clone())?;
+            self.try_push(val.clone())?;
         }
         Ok(())
     }
 
-    pub fn extend_from_within<R>(&mut self, src: R) -> Result<()>
+    pub fn extend_from_slice(&mut self, other: &[T])
+    where
+        T: Clone,
+    {
+        // Inefficient, but it works
+        for val in other {
+            self.push(val.clone());
+        }
+    }
+
+    pub fn try_extend_from_within<R>(&mut self, src: R) -> Result<()>
     where
         R: RangeBounds<usize>,
         T: Clone,
@@ -485,9 +566,29 @@ impl<T> ArenaVec<T> {
         });
         for idx in range {
             let val = unsafe { self.as_ptr().add(idx).read().clone() };
-            self.push(val)?;
+            self.try_push(val)?;
         }
         Ok(())
+    }
+
+    pub fn extend_from_within<R>(&mut self, src: R)
+    where
+        R: RangeBounds<usize>,
+        T: Clone,
+    {
+        let range = (match src.start_bound() {
+            Bound::Included(i) => *i,
+            Bound::Excluded(i) => *i + 1,
+            Bound::Unbounded => 0,
+        })..(match src.end_bound() {
+            Bound::Included(i) => *i + 1,
+            Bound::Excluded(i) => *i,
+            Bound::Unbounded => self.len(),
+        });
+        for idx in range {
+            let val = unsafe { self.as_ptr().add(idx).read().clone() };
+            self.push(val);
+        }
     }
 }
 impl<T> Default for ArenaVec<T> {
@@ -548,15 +649,34 @@ impl<T> DerefMut for ArenaVec<T> {
 impl<T: Clone> From<&[T]> for ArenaVec<T> {
     fn from(value: &[T]) -> Self {
         let mut v = Self::with_capacity(value.len());
-        v.extend(value.iter().map(|t| t.clone())).unwrap();
+        v.extend(value.iter().map(|t| t.clone()));
         v
     }
 }
 impl<T: Clone, const N: usize> From<&[T; N]> for ArenaVec<T> {
     fn from(value: &[T; N]) -> Self {
         let mut v = Self::with_capacity(N);
-        v.extend(value.iter().map(|t| t.clone())).unwrap();
+        v.extend(value.iter().map(|t| t.clone()));
         v
+    }
+}
+
+impl<'a, T> Extend<&'a T> for ArenaVec<T>
+where
+    T: Copy + 'a,
+{
+    fn extend<I: IntoIterator<Item = &'a T>>(&mut self, iter: I) {
+        for item in iter {
+            self.push(*item);
+        }
+    }
+}
+
+impl<T> Extend<T> for ArenaVec<T> {
+    fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
+        for item in iter {
+            self.push(item);
+        }
     }
 }
 
