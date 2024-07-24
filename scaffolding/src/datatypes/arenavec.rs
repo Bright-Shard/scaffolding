@@ -362,7 +362,7 @@ impl<T> ArenaVec<T> {
     {
         // First, tag all duplicates
         // Arenavec?
-        let mut duplicate_idxs = Vec::new();
+        let duplicate_idxs = ArenaVec::with_capacity(self.capacity);
         for idx in 0..(self.len() - 1) {
             if self.get(idx).unwrap().eq(&self.get(idx + 1).unwrap()) {
                 duplicate_idxs.push(idx + 1);
@@ -396,7 +396,7 @@ impl<T> ArenaVec<T> {
     {
         // First, tag all duplicates
         // Arenavec?
-        let mut duplicate_idxs = Vec::new();
+        let duplicate_idxs = ArenaVec::with_capacity(self.capacity);
         // the iteration here has to be a little weird, because guarantees we make about eq types are no longer relavent here
         // if we have elements a, b, and c, and a ~= b, and a ~= c, this doesn't necessarily mean that b ~= c
         // Because the spec says that we compare two items with the func and remove the second one (although it's first in the function call),
