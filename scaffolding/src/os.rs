@@ -51,9 +51,7 @@ pub trait OsTrait {
     unsafe fn deallocate(ptr: NonNull<c_void>, amount: usize);
 }
 
-/// Miscellaneous OS information. An instance of this is stored as a global,
-/// which you can get with [`OsMetadata::global()`] or
-/// [`OsMetadata::global_unchecked()`].
+/// Miscellaneous OS information.
 pub struct OsMetadata {
     /// The size of a single memory page on this OS.
     pub page_size: usize,

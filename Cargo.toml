@@ -1,8 +1,7 @@
 [workspace]
-members = [ "examples/gui","plugins/scaffolding-ui", "scaffolding"]
+members = ["examples/gui", "plugins/scaffolding-ui", "scaffolding"]
 exclude = ["benchmarks"]
 resolver = "2"
 
 [workspace.dependencies]
 scaffolding = { path = "scaffolding", default-features = false, features = [] }
-scaffolding-ui.path = "plugins/scaffolding-ui"
