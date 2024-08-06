@@ -4,6 +4,7 @@ use {
     alloc::{
         alloc::{alloc, Layout},
         boxed::Box,
+        vec::Vec,
     },
     core::{
         any::{Any, TypeId},

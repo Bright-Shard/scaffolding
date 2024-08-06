@@ -7,12 +7,14 @@ use {
     },
     core::{
         borrow::{Borrow, BorrowMut},
-        mem::{self, needs_drop, MaybeUninit},
-        ops::{Bound, Deref, DerefMut, Range, RangeBounds},
-        ptr::{self, addr_of, NonNull},
-        slice::SliceIndex,
+        cell::Cell,
+        cmp::Ordering,
+        mem::{self, MaybeUninit},
+        ops::{Bound, Deref, DerefMut, RangeBounds},
+        ops::{Index, IndexMut},
+        ptr::{self, NonNull},
+        slice::{self, SliceIndex},
     },
-    std::ops::{Index, IndexMut},
 };
 
 /// Represents possible errors that vec functions can return
@@ -22,7 +24,7 @@ pub enum Error {
     IndexOutOfBounds,
 }
 
-pub type Result<T> = std::result::Result<T, Error>;
+pub type Result<T> = core::result::Result<T, Error>;
 
 /// A vector backed by an arena allocator. Arenavecs never reallocate, meaning pushing to an
 /// arenavec is guaranteed to never move its items in memory. This unique property allows an
@@ -66,9 +68,9 @@ pub struct ArenaVec<T> {
     /// The total amount of memory the arenavec reserved when it was created.
     reserved_memory: usize,
     /// The amount of memory the arenavec has allocated and can be used to store data.
-    capacity: usize,
+    capacity: Cell<usize>,
     /// The number of entries in the arenavec.
-    len: usize,
+    len: Cell<usize>,
     /// A pointer to the base of the memory buffer storing all the arenavec's
     /// items.
     // TODO: Swap this pointer out for a `NonNull` once `nonnull_convenience`
@@ -118,50 +120,41 @@ impl<T> ArenaVec<T> {
             panic!("Attempted to create an ArenaVec with less reserved memory than allocated capacity.");
         }
 
-        crate::init();
+        let reserved_memory = OsMetadata::default().page_align(reserved_memory);
+        let buffer = Os::reserve(reserved_memory).unwrap();
 
-        let reserved_memory = unsafe { OsMetadata::global_unchecked().page_align(reserved_memory) };
-        let buffer = Os::reserve(reserved_memory).unwrap().as_ptr().cast::<T>();
+        unsafe {
+            Os::commit(buffer, capacity);
+        }
 
         Self {
             reserved_memory,
-            capacity,
-            len: 0,
-            buffer,
-        }
-    }
-
-    /// Widly unsafe method for creating an `[ArenaVec]` from a raw pointer
-    pub unsafe fn from_raw_parts(
-        buffer: *mut T,
-        len: usize,
-        capacity: usize,
-        reserved_memory: usize,
-    ) -> ArenaVec<T> {
-        ArenaVec {
-            reserved_memory,
-            capacity,
-            len,
-            buffer,
+            capacity: Cell::new(capacity),
+            len: Cell::new(0),
+            buffer: buffer.as_ptr().cast(),
         }
     }
 
     pub fn try_push(&self, val: T) -> Result<()> {
-        self.try_ensure_capacity(self.len + 1)?;
+        let len = self.len();
+        self.try_ensure_capacity(len + 1)?;
 
         unsafe {
-            let ptr = self.buffer.add(self.len);
+            let ptr = self.buffer.add(len);
             ptr.write(val);
-            *addr_of!(self.len).cast_mut() += 1;
         }
+
+        self.len.set(len + 1);
+
         Ok(())
     }
 
     // convience function to allocate memory if necessary
     // This function will allocate memory if necessary to ensure that self.capacity is at least equal to the capaciy argument
     fn ensure_capacity(&self, capacity: usize) {
-        if capacity > self.capacity {
-            let used_memory = mem::size_of::<T>() * self.len;
+        let current_capacity = self.capacity();
+        if capacity > current_capacity {
+            let used_memory = mem::size_of::<T>() * self.len();
 
             // Double in size if possible, else reserve all memory
             let growth_amount = if used_memory == 0 {
@@ -171,9 +164,7 @@ impl<T> ArenaVec<T> {
             } else {
                 self.reserved_memory - used_memory
             };
-
-            // global state was loaded when the arenavec was created
-            let growth_amount = unsafe { OsMetadata::global_unchecked().page_align(growth_amount) };
+            let growth_amount = OsMetadata::default().page_align(growth_amount);
 
             if used_memory + growth_amount > self.reserved_memory {
                 // rip bozo
@@ -181,12 +172,11 @@ impl<T> ArenaVec<T> {
             }
 
             let region_to_allocate =
-                unsafe { NonNull::new_unchecked(self.buffer.byte_add(self.capacity)) };
+                unsafe { NonNull::new_unchecked(self.buffer.byte_add(current_capacity)) };
             unsafe { Os::commit(region_to_allocate.cast(), growth_amount) };
 
-            unsafe {
-                *addr_of!(self.capacity).cast_mut() += growth_amount;
-            }
+            self.capacity.set(current_capacity + growth_amount);
+            debug_assert!(self.capacity() >= capacity);
         }
     }
 
@@ -194,8 +184,9 @@ impl<T> ArenaVec<T> {
     // This function will allocate memory if necessary to ensure that self.capacity is at least equal to the capaciy argument
     // If this function can't allocate more room, it will return an error instead of panicking
     fn try_ensure_capacity(&self, capacity: usize) -> Result<()> {
-        if capacity > self.capacity {
-            let used_memory = mem::size_of::<T>() * self.len;
+        let current_capacity = self.capacity();
+        if capacity > current_capacity {
+            let used_memory = mem::size_of::<T>() * self.len.get();
 
             // Double in size if possible, else reserve all memory
             let growth_amount = if used_memory == 0 {
@@ -205,9 +196,7 @@ impl<T> ArenaVec<T> {
             } else {
                 self.reserved_memory - used_memory
             };
-
-            // global state was loaded when the arenavec was created
-            let growth_amount = unsafe { OsMetadata::global_unchecked().page_align(growth_amount) };
+            let growth_amount = OsMetadata::default().page_align(growth_amount);
 
             if used_memory + growth_amount > self.reserved_memory {
                 // rip bozo
@@ -215,95 +204,96 @@ impl<T> ArenaVec<T> {
             }
 
             let region_to_allocate =
-                unsafe { NonNull::new_unchecked(self.buffer.byte_add(self.capacity)) };
+                unsafe { NonNull::new_unchecked(self.buffer.byte_add(current_capacity)) };
             unsafe { Os::commit(region_to_allocate.cast(), growth_amount) };
 
-            unsafe {
-                *addr_of!(self.capacity).cast_mut() += growth_amount;
-            }
+            self.capacity.set(current_capacity + growth_amount);
         }
         Ok(())
     }
 
     pub fn reserve(&mut self, additional: usize) {
-        self.ensure_capacity(self.len + additional);
-    }
-
-    pub fn reserve_exact(&mut self, additional: usize) {
-        self.ensure_capacity(self.len + additional);
+        self.ensure_capacity(self.len() + additional);
     }
 
     pub fn try_reserve(&mut self, additional: usize) -> Result<()> {
-        self.try_ensure_capacity(self.len + additional)
-    }
-
-    pub fn try_reserve_exact(&mut self, additional: usize) -> Result<()> {
-        self.try_ensure_capacity(self.len + additional)
+        self.try_ensure_capacity(self.len() + additional)
     }
 
     pub fn push(&self, val: T) {
-        self.ensure_capacity(self.len() + 1);
+        let len = self.len();
+        self.ensure_capacity(len + 1);
+        debug_assert!(self.len() < self.capacity());
 
         unsafe {
-            let ptr = self.buffer.add(self.len);
+            let ptr = self.buffer.add(len);
             ptr.write(val);
-            *addr_of!(self.len).cast_mut() += 1;
         }
+
+        self.len.set(len + 1);
     }
 
     pub fn pop(&mut self) -> Option<T> {
         if self.is_empty() {
             None
         } else {
-            self.len -= 1;
-            Some(unsafe { self.as_mut_ptr().add(self.len() + 1).read() })
+            let len = self.len();
+            self.len.set(len - 1);
+            Some(unsafe { self.as_mut_ptr().add(len).read() })
         }
     }
 
     pub fn insert(&mut self, idx: usize, element: T) {
-        if idx == self.len {
-            self.push(element);
-        } else if idx > self.len {
-            panic!("Index out of bounds");
-        } else {
-            self.ensure_capacity(self.len + 1);
-            // memcpy is faster here im sure
-            unsafe {
-                let src_ptr = self.buffer.add(idx);
-                let dest_ptr = src_ptr.add(1);
-                src_ptr.copy_to(dest_ptr, self.len - idx);
-                *src_ptr = element;
+        let len = self.len();
+        match idx.cmp(&len) {
+            Ordering::Equal => {
+                self.push(element);
+            }
+            Ordering::Greater => {
+                panic!("Index out of bounds");
+            }
+            _ => {
+                self.ensure_capacity(len + 1);
+
+                unsafe {
+                    let src_ptr = self.buffer.add(idx);
+                    let dest_ptr = src_ptr.add(1);
+                    src_ptr.copy_to(dest_ptr, len - idx - 1);
+                    src_ptr.write(element);
+                }
             }
         }
     }
 
     pub fn try_insert(&mut self, idx: usize, element: T) -> Result<()> {
-        if idx == self.len {
-            self.try_push(element)
-        } else if idx > self.len {
-            Err(Error::IndexOutOfBounds)
-        } else {
-            self.try_ensure_capacity(self.len + 1)?;
-            // memcpy is faster here im sure
-            unsafe {
-                let src_ptr = self.buffer.add(idx);
-                let dest_ptr = src_ptr.add(1);
-                src_ptr.copy_to(dest_ptr, self.len - idx);
-                *src_ptr = element;
+        let len = self.len();
+        match idx.cmp(&len) {
+            Ordering::Equal => self.try_push(element),
+            Ordering::Greater => Err(Error::IndexOutOfBounds),
+            Ordering::Less => {
+                self.ensure_capacity(len + 1);
+
+                unsafe {
+                    let src_ptr = self.buffer.add(idx);
+                    let dest_ptr = src_ptr.add(1);
+                    src_ptr.copy_to(dest_ptr, len - idx - 1);
+                    src_ptr.write(element);
+                }
+
+                Ok(())
             }
-            Ok(())
         }
     }
 
     pub fn get(&self, idx: usize) -> Option<&T> {
-        if idx < self.len {
+        if idx < self.len() {
             Some(unsafe { &*self.buffer.add(idx) })
         } else {
             None
         }
     }
     pub fn get_mut(&mut self, idx: usize) -> Option<&mut T> {
-        if idx < self.len {
+        if idx < self.len() {
             Some(unsafe { &mut *self.buffer.add(idx) })
         } else {
             None
@@ -312,15 +302,16 @@ impl<T> ArenaVec<T> {
 
     /// Removes an item from the vector, moving all items after it down a slot.
     pub fn remove(&mut self, idx: usize) -> Option<T> {
-        if idx < self.len {
+        let len = self.len.get();
+        if idx < len {
             let ptr = unsafe { self.buffer.add(idx) };
             let val = unsafe { ptr.read() };
 
             unsafe {
-                ptr::copy(ptr.add(1), ptr, self.len - idx - 1);
+                ptr::copy(ptr.add(1), ptr, len - idx - 1);
             }
 
-            self.len -= 1;
+            self.len.set(len - 1);
 
             Some(val)
         } else {
@@ -335,7 +326,7 @@ impl<T> ArenaVec<T> {
         // there's definitely a faster way to do this lol
         // sorry
         let mut idx = 0;
-        while idx < self.len {
+        while idx < self.len.get() {
             if f(&self[idx]) {
                 self.remove(idx);
             } else {
@@ -351,7 +342,7 @@ impl<T> ArenaVec<T> {
         // there's definitely a faster way to do this lol
         // sorry
         let mut idx = 0;
-        while idx < self.len {
+        while idx < self.len.get() {
             if f(&mut self[idx]) {
                 self.remove(idx);
             } else {
@@ -363,7 +354,7 @@ impl<T> ArenaVec<T> {
     /// Returns an iterator over all the items in this arenavec. This iterator will set the arenavec's
     /// length to 0, regardless of how much you progress through it.
     pub fn drain(&mut self) -> Drain<'_, T> {
-        let len = self.len;
+        let len = self.len();
 
         Drain {
             arena_vec: self,
@@ -373,22 +364,29 @@ impl<T> ArenaVec<T> {
     }
 
     pub fn clear(&mut self) {
-        self.len = 0;
+        self.len.set(0);
     }
 
+    #[inline(always)]
     pub fn len(&self) -> usize {
-        self.len
+        self.len.get()
     }
+    /// Forces the `ArenaVec`'s length to be `len`.
+    ///
+    /// # Safety
+    /// - `len` must be less than or equal to the `ArenaVec`'s capacity
+    /// - All of the elements up to `len` must be initialized
     pub unsafe fn set_len(&mut self, len: usize) {
-        self.len = len;
+        self.len.set(len);
     }
 
     pub fn is_empty(&self) -> bool {
-        self.len == 0
+        self.len() == 0
     }
 
+    #[inline(always)]
     pub fn capacity(&self) -> usize {
-        self.capacity
+        self.capacity.get()
     }
 
     pub fn reserved_memory(&self) -> usize {
@@ -397,7 +395,7 @@ impl<T> ArenaVec<T> {
 
     /// This function returns the count of Ts that can be pushed before the vector runs out of memory
     pub fn remaining_space(&self) -> usize {
-        self.reserved_memory().div_ceil(std::mem::size_of::<T>()) - self.len()
+        self.reserved_memory().div_ceil(mem::size_of::<T>()) - self.len()
     }
 
     pub fn as_ptr(&self) -> *const T {
@@ -414,29 +412,22 @@ impl<T> ArenaVec<T> {
         }
     }
 
-    pub fn iter_mut<'a>(&'a mut self) -> IterMut<'a, T> {
+    pub fn iter_mut(&mut self) -> IterMut<'_, T> {
         IterMut {
             arena_vec: self,
             idx: 0,
         }
     }
 
-    pub fn into_iter(self) -> IntoIter<T> {
-        IntoIter {
-            arena_vec: self,
-            idx: 0,
-        }
-    }
-
     pub fn as_slice(&self) -> &[T] {
-        unsafe { std::slice::from_raw_parts(self.buffer as *const T, self.len) }
+        unsafe { slice::from_raw_parts(self.buffer, self.len()) }
     }
     pub fn as_mut_slice(&mut self) -> &mut [T] {
-        unsafe { std::slice::from_raw_parts_mut(self.buffer, self.len) }
+        unsafe { slice::from_raw_parts_mut(self.buffer, self.len()) }
     }
     // This isn't using the trait because it can fail
     pub fn try_extend<I: IntoIterator<Item = T>>(&mut self, iter: I) -> Result<()> {
-        let mut iter = iter.into_iter();
+        let iter = iter.into_iter();
         // There's not enough space to fit the whole iterator in
         if iter.size_hint().0 > self.remaining_space() {
             Err(Error::OutOfMemoryAddresses)
@@ -445,7 +436,7 @@ impl<T> ArenaVec<T> {
         // We may want to have it stay the same as it was before if it errors out
         // But we can change that later
         else {
-            while let Some(val) = iter.next() {
+            for val in iter {
                 self.try_push(val)?;
             }
             Ok(())
@@ -453,24 +444,18 @@ impl<T> ArenaVec<T> {
     }
 
     pub fn try_append(&mut self, other: &mut ArenaVec<T>) -> Result<()> {
-        if self.remaining_space() < other.len() {
-            Err(Error::OutOfMemoryAddresses)
-        } else {
-            unsafe { std::ptr::copy(other.as_ptr(), self.as_mut_ptr(), other.len()) };
-            // Should we zero out the other vecs memory?
-            other.clear();
-            Ok(())
-        }
+        self.try_ensure_capacity(self.capacity() + other.len())?;
+        unsafe { ptr::copy(other.as_ptr(), self.as_mut_ptr(), other.len()) };
+        // Should we zero out the other vecs memory?
+        other.clear();
+        Ok(())
     }
 
     pub fn append(&mut self, other: &mut ArenaVec<T>) {
-        if self.remaining_space() < other.len() {
-            panic!("ArenaVec needed to grow, but ran out of reserved memory");
-        } else {
-            unsafe { std::ptr::copy(other.as_ptr(), self.as_mut_ptr(), other.len()) };
-            // Should we zero out the other vecs memory?
-            other.clear();
-        }
+        self.ensure_capacity(self.capacity() + other.len());
+        unsafe { ptr::copy(other.as_ptr(), self.as_mut_ptr(), other.len()) };
+
+        other.clear();
     }
 
     pub fn dedup(&mut self)
@@ -479,9 +464,9 @@ impl<T> ArenaVec<T> {
     {
         // First, tag all duplicates
         // Arenavec?
-        let duplicate_idxs = ArenaVec::with_capacity(self.capacity);
+        let duplicate_idxs = ArenaVec::with_capacity(self.capacity());
         for idx in 0..(self.len() - 1) {
-            if self.get(idx).unwrap().eq(&self.get(idx + 1).unwrap()) {
+            if self.get(idx).unwrap().eq(self.get(idx + 1).unwrap()) {
                 duplicate_idxs.push(idx + 1);
             }
         }
@@ -511,7 +496,7 @@ impl<T> ArenaVec<T> {
         F: FnMut(&mut T, &mut T) -> bool,
     {
         // First, tag all duplicates
-        let duplicate_idxs = ArenaVec::with_capacity(self.capacity);
+        let duplicate_idxs = ArenaVec::with_capacity(self.capacity());
         // the iteration here has to be a little weird, because guarantees we make about eq types are no longer relavent here
         // if we have elements a, b, and c, and a ~= b, and a ~= c, this doesn't necessarily mean that b ~= c
         // Because the spec says that we compare two items with the func and remove the second one (although it's first in the function call),
@@ -559,7 +544,7 @@ impl<T> ArenaVec<T> {
         K: PartialEq,
     {
         // First, tag all duplicates
-        let duplicate_idxs = ArenaVec::with_capacity(self.capacity);
+        let duplicate_idxs = ArenaVec::with_capacity(self.capacity());
         // the iteration here has to be a little weird, because guarantees we make about eq types are no longer relavent here
         // if we have elements a, b, and c, and a ~= b, and a ~= c, this doesn't necessarily mean that b ~= c
         // Because the spec says that we compare two items with the func and remove the second one (although it's first in the function call),
@@ -608,9 +593,9 @@ impl<T> ArenaVec<T> {
             return Ok(other);
         }
         unsafe {
-            ptr::copy(self.as_ptr().add(at), other.as_mut_ptr(), self.len() - at);
+            ptr::copy(self.buffer.add(at), other.as_mut_ptr(), self.len() - at - 1);
         }
-        self.len = at;
+        self.len.set(at);
         Ok(other)
     }
 
@@ -618,23 +603,25 @@ impl<T> ArenaVec<T> {
         if new_len > self.len() {
             return;
         }
-        self.len = new_len;
+        self.len.set(new_len);
     }
 
     pub fn try_resize_with<F>(&mut self, new_len: usize, mut f: F) -> Result<()>
     where
         F: FnMut() -> T,
     {
-        if new_len < self.len() {
-            self.truncate(new_len);
-            Ok(())
-        } else if new_len == self.len() {
-            Ok(())
-        } else {
-            while self.len() < new_len {
-                self.try_push(f())?;
+        match new_len.cmp(&self.len()) {
+            Ordering::Less => {
+                self.truncate(new_len);
+                Ok(())
             }
-            Ok(())
+            Ordering::Equal => Ok(()),
+            Ordering::Greater => {
+                while self.len() < new_len {
+                    self.try_push(f())?;
+                }
+                Ok(())
+            }
         }
     }
 
@@ -662,9 +649,9 @@ impl<T> ArenaVec<T> {
 
     pub fn spare_capacity_mut(&mut self) -> &mut [MaybeUninit<T>] {
         unsafe {
-            std::slice::from_raw_parts_mut(
-                self.as_mut_ptr().add(self.len) as *mut MaybeUninit<T>,
-                self.capacity - self.len,
+            slice::from_raw_parts_mut(
+                self.buffer.add(self.len()) as *mut MaybeUninit<T>,
+                self.capacity() - self.len(),
             )
         }
     }
@@ -718,12 +705,13 @@ impl<T> ArenaVec<T> {
             Bound::Excluded(i) => *i + 1,
             Bound::Unbounded => 0,
         })..(match src.end_bound() {
-            Bound::Included(i) => *i + 1,
+            Bound::Included(i) => *i - 1,
             Bound::Excluded(i) => *i,
             Bound::Unbounded => self.len(),
         });
+
         for idx in range {
-            let val = unsafe { self.as_ptr().add(idx).read().clone() };
+            let val = self.get(idx).ok_or(Error::IndexOutOfBounds)?.clone();
             self.try_push(val)?;
         }
         Ok(())
@@ -744,51 +732,42 @@ impl<T> ArenaVec<T> {
             Bound::Unbounded => self.len(),
         });
         for idx in range {
-            let val = unsafe { self.as_ptr().add(idx).read().clone() };
+            let val = self.get(idx).expect("Index out of bounds").clone();
             self.push(val);
         }
     }
 
     // TODO: actually deallocate pages here lol
     pub fn shrink_to(&mut self, min_capacity: usize) {
-        let new_cap = self.capacity().min(min_capacity.max(self.len));
-        self.capacity = new_cap;
+        let new_cap = self.capacity().min(min_capacity.max(self.len()));
+        self.capacity.set(new_cap);
     }
     pub fn shrink_to_fit(&mut self) {
-        self.shrink_to(self.len);
+        self.shrink_to(self.len());
     }
 
-    pub fn swap_remove(&mut self, index: usize) -> T {
-        if index >= self.len {
-            panic!("Index out of bounds");
-        } else if index == self.len - 1 {
-            return self.pop().unwrap();
-        }
-        let mut t = MaybeUninit::uninit();
-        unsafe {
-            ptr::copy(self.as_ptr().add(index), t.as_mut_ptr(), 1);
-            ptr::copy(
-                self.as_ptr().add(self.len - 1),
-                self.as_mut_ptr().add(index),
-                1,
-            );
-        }
-        self.len -= 1;
-        unsafe { t.assume_init() }
+    pub fn swap_remove(&mut self, idx: usize) -> T {
+        let mut result = self.pop().unwrap();
+        mem::swap(&mut self[idx], &mut result);
+
+        result
     }
 
     pub fn split_off(&mut self, at: usize) -> ArenaVec<T> {
-        if at > self.len {
-            panic!("Index out of bounds");
-        } else if at == self.len {
-            ArenaVec::new()
-        } else {
-            let mut v = ArenaVec::with_capacity(self.len - at);
-            unsafe {
-                ptr::copy(self.as_ptr().add(at), v.as_mut_ptr(), self.len - at);
+        let len = self.len();
+        match at.cmp(&len) {
+            Ordering::Greater => {
+                panic!("Index out of bounds");
             }
-            self.len = at;
-            v
+            Ordering::Equal => ArenaVec::default(),
+            Ordering::Less => {
+                let mut v = ArenaVec::with_capacity(len - at);
+                unsafe {
+                    ptr::copy(self.buffer.add(at), v.as_mut_ptr(), len - at - 1);
+                }
+                self.len.set(at);
+                v
+            }
         }
     }
 }
@@ -801,7 +780,7 @@ impl<T> Drop for ArenaVec<T> {
     fn drop(&mut self) {
         unsafe {
             let buffer = NonNull::new_unchecked(self.buffer);
-            Os::decommit(buffer.cast(), self.capacity);
+            Os::decommit(buffer.cast(), self.capacity());
             Os::dereserve(buffer.cast(), self.reserved_memory);
         }
     }
@@ -846,18 +825,17 @@ impl<T> DerefMut for ArenaVec<T> {
         self.as_mut_slice()
     }
 }
-// I'm not implementing Extend right now, because I don't know if we want falliable APIs like that in the struct
 impl<T: Clone> From<&[T]> for ArenaVec<T> {
     fn from(value: &[T]) -> Self {
         let mut v = Self::with_capacity(value.len());
-        v.extend(value.iter().map(|t| t.clone()));
+        v.extend(value.iter().cloned());
         v
     }
 }
 impl<T: Clone, const N: usize> From<&[T; N]> for ArenaVec<T> {
     fn from(value: &[T; N]) -> Self {
         let mut v = Self::with_capacity(N);
-        v.extend(value.iter().map(|t| t.clone()));
+        v.extend(value.iter().cloned());
         v
     }
 }
@@ -865,7 +843,7 @@ impl<T: Clone, const N: usize> From<&[T; N]> for ArenaVec<T> {
 impl<T, const N: usize> From<[T; N]> for ArenaVec<T> {
     fn from(value: [T; N]) -> Self {
         let mut v = Self::with_capacity(N);
-        v.extend(value.into_iter());
+        v.extend(value);
         v
     }
 }
@@ -882,10 +860,11 @@ impl<T> FromIterator<T> for ArenaVec<T> {
     }
 }
 
+#[cfg(any(feature = "std", test))]
 impl<T> From<Vec<T>> for ArenaVec<T> {
     fn from(value: Vec<T>) -> Self {
         let mut v = Self::with_capacity(value.len());
-        v.extend(value.into_iter());
+        v.extend(value);
         v
     }
 }
@@ -914,8 +893,9 @@ where
     I: SliceIndex<[T]>,
 {
     type Output = <I as SliceIndex<[T]>>::Output;
+
     fn index(&self, index: I) -> &Self::Output {
-        unsafe { (self as &[T]).get_unchecked(index) }
+        &(self as &[T])[index]
     }
 }
 
@@ -924,7 +904,7 @@ where
     I: SliceIndex<[T]>,
 {
     fn index_mut(&mut self, index: I) -> &mut Self::Output {
-        unsafe { (self as &mut [T]).get_unchecked_mut(index) }
+        &mut (self as &mut [T])[index]
     }
 }
 
@@ -950,7 +930,7 @@ impl<'a, T> Iterator for Drain<'a, T> {
 }
 impl<'a, T> Drop for Drain<'a, T> {
     fn drop(&mut self) {
-        self.arena_vec.len = 0;
+        self.arena_vec.len.set(0);
     }
 }
 
@@ -974,12 +954,14 @@ pub struct IterMut<'a, T> {
 
 impl<'a, T> Iterator for IterMut<'a, T> {
     type Item = &'a mut T;
+
     fn next(&mut self) -> Option<Self::Item> {
         let idx = self.idx;
         if idx >= self.arena_vec.len() {
             return None;
         }
         self.idx += 1;
+
         let ptr = self.arena_vec.as_mut_ptr();
         Some(unsafe { ptr.add(idx).as_mut().unwrap() })
     }
@@ -998,6 +980,7 @@ impl<T> Iterator for IntoIter<T> {
             return None;
         }
         self.idx += 1;
+
         let ptr = self.arena_vec.as_mut_ptr();
         Some(unsafe { ptr.add(idx).read() })
     }
@@ -1006,8 +989,12 @@ impl<T> Iterator for IntoIter<T> {
 impl<T> IntoIterator for ArenaVec<T> {
     type Item = T;
     type IntoIter = IntoIter<T>;
+
     fn into_iter(self) -> Self::IntoIter {
-        self.into_iter()
+        IntoIter {
+            arena_vec: self,
+            idx: 0,
+        }
     }
 }
 
@@ -1018,13 +1005,20 @@ mod tests {
     #[test]
     fn do_it_work_tho() {
         let vec = ArenaVec::default();
+        println!("ello");
         vec.push(0);
+        println!("ello");
         vec.push(1);
+        println!("ello");
         vec.push(2);
+        println!("ello");
 
         assert_eq!(*vec.get(0).unwrap(), 0);
+        println!("ello");
         assert_eq!(*vec.get(1).unwrap(), 1);
+        println!("ello");
         assert_eq!(*vec.get(2).unwrap(), 2);
+        println!("ello");
     }
 
     #[test]
@@ -1053,7 +1047,6 @@ mod tests {
         assert_eq!(iter.next(), Some(&2));
         assert_eq!(iter.next(), None);
 
-        drop(iter);
         assert_eq!(*vec.get(0).unwrap(), 0);
         assert_eq!(*vec.get(1).unwrap(), 1);
         assert_eq!(*vec.get(2).unwrap(), 2);
@@ -1073,7 +1066,6 @@ mod tests {
         assert_eq!(iter.next(), Some(&mut 2));
         assert_eq!(iter.next(), None);
 
-        drop(iter);
         assert_eq!(*vec.get(0).unwrap(), 0);
         assert_eq!(*vec.get(1).unwrap(), 1);
         assert_eq!(*vec.get(2).unwrap(), 2);
@@ -1116,5 +1108,24 @@ mod tests {
         assert_eq!(iter.next(), Some(1));
         assert_eq!(iter.next(), Some(2));
         assert_eq!(iter.next(), None);
+    }
+
+    #[test]
+    fn clear() {
+        let mut vec = ArenaVec::default();
+        vec.push(0);
+        vec.push(1);
+        vec.push(2);
+
+        assert_eq!(vec.len(), 3);
+        vec.clear();
+        assert_eq!(vec.len(), 0);
+
+        vec.push(0);
+        vec.push(1);
+        vec.push(1);
+        vec.push(1);
+        vec.push(1);
+        assert_eq!(vec.len(), 5);
     }
 }

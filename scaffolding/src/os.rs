@@ -3,12 +3,7 @@
 //! The API used by Scaffolding is described in [`OsTrait`]. Each OS'
 //! implementation is in its own file.
 
-use core::{
-    alloc::Layout,
-    ffi::c_void,
-    mem::MaybeUninit,
-    ptr::{addr_of, NonNull},
-};
+use core::{alloc::Layout, ffi::c_void, ptr::NonNull};
 
 /// OS functions Scaffolding needs access to.
 pub trait OsTrait {
@@ -56,10 +51,6 @@ pub trait OsTrait {
     unsafe fn deallocate(ptr: NonNull<c_void>, amount: usize);
 }
 
-/// A shared instance of [`OsInfo`]. This prevents having to constantly call functions to get
-/// OS metadata; it's loaded once in this global and then gets read from there forever.
-pub(crate) static mut OS_INFO: OsMetadata = unsafe { MaybeUninit::zeroed().assume_init() };
-
 /// Miscellaneous OS information. An instance of this is stored as a global,
 /// which you can get with [`OsMetadata::global()`] or
 /// [`OsMetadata::global_unchecked()`].
@@ -70,26 +61,6 @@ pub struct OsMetadata {
 impl OsMetadata {
     /// Which OS this program is running on.
     pub const TYPE: OsType = Os::TYPE;
-
-    /// Ensures Scaffolding's global state has been loaded, then returns the
-    /// global [`OsMetadata`] instance.
-    #[inline(always)]
-    pub fn global() -> &'static Self {
-        crate::init();
-
-        unsafe { &*addr_of!(OS_INFO) }
-    }
-
-    /// Gets the global [`OsMetadata`] instance.
-    ///
-    /// # Safety
-    /// Unlike [`OsMetadata::global`], this doesn't verify that the Scaffolding
-    /// global state has been loaded yet. This method should only be used if
-    /// you know global state has already been loaded.
-    #[inline(always)]
-    pub unsafe fn global_unchecked() -> &'static Self {
-        unsafe { &*addr_of!(OS_INFO) }
-    }
 
     /// Align a number to the OS' page size.
     #[inline(always)]

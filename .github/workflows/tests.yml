@@ -25,5 +25,5 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
       - name: Cargo Test
-        run: cargo test --workspace
+        run: cargo test --workspace --exclude scaffolding-ui
   # TODO: Add windows tests here when windows is supported

@@ -32,28 +32,3 @@ pub mod plugin_prelude {
         },
     };
 }
-
-use {
-    core::{
-        ptr::addr_of_mut,
-        sync::atomic::{AtomicBool, Ordering},
-    },
-    os::OsMetadata,
-};
-
-/// Used by Scaffolding to lazily initialize global state.
-static INTIALISED: AtomicBool = AtomicBool::new(false);
-
-/// Initializes global Scaffolding variables. This will be called for you when
-/// a new [`World`] is created.
-///
-/// [`World`]: world::World
-pub fn init() {
-    if !INTIALISED.load(Ordering::Relaxed) {
-        unsafe {
-            *addr_of_mut!(os::OS_INFO) = OsMetadata::default();
-        }
-
-        INTIALISED.store(true, Ordering::Release);
-    }
-}

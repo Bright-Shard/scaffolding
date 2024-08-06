@@ -3,6 +3,14 @@
 version = 3
 
 [[package]]
+name = "gui"
+version = "0.1.0"
+dependencies = [
+ "scaffolding",
+ "scaffolding-ui",
+]
+
+[[package]]
 name = "libc"
 version = "0.2.155"
 source = "registry+https://github.com/rust-lang/crates.io-index"

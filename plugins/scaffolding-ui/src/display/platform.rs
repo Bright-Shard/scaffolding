@@ -5,9 +5,11 @@
 //! This module is similar to the `os` module in Scaffolding. It's the set of
 //! functions ScaffoldingUI needs access to in order to create a GUI app.
 
+use scaffolding::world::World;
+
 /// Platform APIs that ScaffoldingUI needs access to.
 pub trait PlatformTrait: Sized {
-    fn init() -> Option<Self>;
+    fn new(world: &mut World) -> Option<Self>;
 }
 
 // Platform implementations

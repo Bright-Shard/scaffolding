@@ -40,8 +40,6 @@ impl ImmutableWorld {
         states_memory: usize,
         plugins_memory: usize,
     ) -> Self {
-        crate::init();
-
         Self {
             plugins: TypeMap::new(num_plugins, plugins_memory),
             states: TypeMap::new(num_states, states_memory),

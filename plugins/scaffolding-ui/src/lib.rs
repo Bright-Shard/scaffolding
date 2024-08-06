@@ -1,3 +1,7 @@
+pub mod prelude {
+    pub use crate::ScaffoldingUiPlugin;
+}
+
 pub mod display;
 
 use {display::Display, scaffolding::plugin_prelude::*};
@@ -6,6 +10,7 @@ use {display::Display, scaffolding::plugin_prelude::*};
 pub struct ScaffoldingUiPlugin {}
 impl Plugin for ScaffoldingUiPlugin {
     fn load(&mut self, world: &mut World) {
-        world.add_state(Display::default());
+        let display = Display::new(world);
+        world.add_state(display);
     }
 }
