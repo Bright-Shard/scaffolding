@@ -11,6 +11,6 @@ pub struct ScaffoldingUiPlugin {}
 impl Plugin for ScaffoldingUiPlugin {
     fn load(&mut self, world: &mut World) {
         let display = Display::new(world);
-        world.add_state(display);
+        world.add_singleton(display);
     }
 }

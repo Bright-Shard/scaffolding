@@ -16,7 +16,7 @@ pub mod prelude {
     pub use crate::multi::ExecuteInParallel;
     pub use crate::{
         datatypes::TypeMap,
-        world::{executable_args::*, ExecutableArg, Mutation, World},
+        world::{executable_args::*, ExecutableArg, World},
     };
 }
 pub mod plugin_prelude {
@@ -27,8 +27,8 @@ pub mod plugin_prelude {
     pub use crate::{
         datatypes::{ArenaVec, StackVec, TypeMap, Warehouse},
         world::{
-            executable_args::*, Executable, ExecutableArg, ImmutableWorld, IntoExecutable,
-            Mutation, MutationSet, Plugin, UnsizedExecutable, UnsizedMutation, World,
+            executable_args::*, Executable, ExecutableArg, IntoExecutable, Plugin,
+            UnsizedExecutable, World,
         },
     };
 }

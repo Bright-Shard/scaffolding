@@ -1,8 +1,5 @@
 use {
-    crate::{
-        datatypes::TypeMap,
-        world::{ImmutableWorld, Mutation, UnsizedMutation, World},
-    },
+    crate::world::{ExecutableArg, World},
     alloc::boxed::Box,
     core::{any::Any, marker::PhantomData, ops::Fn},
 };
@@ -11,64 +8,59 @@ use {
 pub trait Executable: Clone + 'static {
     /// The return type.
     type Output: 'static;
-    /// The types that this executable uses to mutate the world.
-    type Mutation: Mutation;
+    /// The executable's arguments.
+    type Arguments: 'static;
 
-    fn execute(&self, world: &mut World, env: &TypeMap) -> Self::Output {
-        let (output, mutation) = self.execute_delayed_mutation(world, env);
-        mutation.apply(world);
-        output
-    }
-    fn execute_delayed_mutation(
-        &self,
-        world: &World,
-        env: &TypeMap,
-    ) -> (Self::Output, Self::Mutation);
+    fn execute(&self, world: &mut World) -> Self::Output;
+    // TODO: Replace with `impl FnOnce(&mut World) + Send + 'static` once
+    // precise capturing is implemented:
+    // https://github.com/rust-lang/rust/issues/123432
+    fn execute_immut(&self, world: &World) -> (Self::Output, Box<dyn FnOnce(&mut World) + Send>);
 }
 
-/// A version of [`Executable`] that can be used as a trait object. Normal executables
-/// require [`Clone`], which requires [`Sized`], and have associated types for their output
-/// and mutations. This type has none of those requirements, allowing it to be simply stored
-/// as a `Box<dyn UnsizedExecutable>`. It's also automatically implemented for all executables,
-/// which means any executable can be upcasted to a trait object with this trait.
+/// A version of [`Executable`] that can be used as a trait object. Normal
+/// executables require [`Clone`], which requires [`Sized`], and have
+/// associated types for their output and mutations. This type has none of
+/// those requirements, allowing it to be simply stored as a
+/// `Box<dyn UnsizedExecutable>`. It's also automatically implemented for all
+/// executables, which means any executable can be upcasted to a trait object
+/// with this trait.
 ///
-/// Because this trait doesn't have associated type, it relies heavily on trait objects and
-/// dynamic typing, which adds overhead. Thus, [`Executable`] should be preferred and used
-/// where possible.
+/// Because this trait doesn't have associated type, it relies heavily on trait
+/// objects and dynamic typing, which adds overhead. Thus, [`Executable`]
+/// should be preferred and used where possible.
 pub trait UnsizedExecutable {
-    /// The same as [`Executable::execute`], except this trait doesn't have an associated `Output`
-    /// type, so the output has to be returned as an [`Any`] trait object.
-    fn execute_unsized(&self, world: &mut World, env: &TypeMap) -> Box<dyn Any>;
-    /// The same as [`Executable::execute_delayed_mutation`], except this trait doesn't have associated
-    /// `Output` and `Mutation` types, so they must be returned as trait objects instead. The output
-    /// is returned as an [`Any`] trait object, and the mutation is returned as an [`UnsizedMutation`]
-    /// trait object.
-    fn execute_delayed_mutation_unsized(
+    /// The same as [`Executable::execute`], except this trait doesn't have an
+    /// associated `Output` type, so the output has to be returned as an
+    /// [`Any`] trait object.
+    fn execute_unsized(&self, world: &mut World) -> Box<dyn Any>;
+
+    fn execute_immut_unsized(
         &self,
         world: &World,
-        env: &TypeMap,
-    ) -> (Box<dyn Any>, Box<dyn UnsizedMutation>);
-    /// This replaces the [`Clone`] requirement in [`Executable`], which means this type doesn't have to be
-    /// sized. Because this type is unsized, the cloned executable has to be returned as a trait object,
-    /// so this method returns another [`UnsizedExecutable`].
+    ) -> (Box<dyn Any>, Box<dyn FnOnce(&mut World) + Send>);
+
+    /// This replaces the [`Clone`] requirement in [`Executable`], which means
+    /// this type doesn't have to be sized. Because this type is unsized, the
+    /// cloned executable has to be returned as a trait object, so this method
+    /// returns another [`UnsizedExecutable`].
     fn dyn_clone(&self) -> Box<dyn UnsizedExecutable>;
 }
-impl<E, Output, M> UnsizedExecutable for E
+impl<E, Output> UnsizedExecutable for E
 where
     Output: 'static,
-    E: Executable<Output = Output, Mutation = M>,
-    M: Mutation,
+    E: Executable<Output = Output>,
 {
-    fn execute_unsized(&self, world: &mut World, env: &TypeMap) -> Box<dyn Any> {
-        Box::new(<E as Executable>::execute(self, world, env))
+    fn execute_unsized(&self, world: &mut World) -> Box<dyn Any> {
+        Box::new(self.execute(world))
     }
-    fn execute_delayed_mutation_unsized(
+    fn execute_immut_unsized(
         &self,
         world: &World,
-        env: &TypeMap,
-    ) -> (Box<dyn Any>, Box<dyn UnsizedMutation>) {
-        let output = <E as Executable>::execute_delayed_mutation(self, world, env);
-        (Box::new(output.0), Box::new(output.1))
+    ) -> (Box<dyn Any>, Box<dyn FnOnce(&mut World) + Send>) {
+        let (output, apply) = self.execute_immut(world);
+
+        (Box::new(output), Box::new(apply))
     }
     fn dyn_clone(&self) -> Box<dyn UnsizedExecutable> {
         Box::new(self.clone())
@@ -78,15 +70,6 @@ impl Clone for Box<dyn UnsizedExecutable> {
     fn clone(&self) -> Self {
         self.dyn_clone()
     }
-}
-
-/// Types that can be used as arguments for [`Executable`]s.
-pub trait ExecutableArg {
-    type Arg<'a>: ExecutableArg<Mutation = Self::Mutation>;
-    type Mutation: Mutation;
-
-    fn from_world_and_env<'a>(world: &'a ImmutableWorld, env: &'a TypeMap) -> Self::Arg<'a>;
-    fn build_mutation(self) -> Self::Mutation;
 }
 
 /// A borrowed [`ExecutableArg`].
@@ -157,9 +140,9 @@ pub trait ExecutableArg {
 pub trait ExecutableArgRef {
     /// The [`ExecutableArg`] being borrowed.
     type EA: ExecutableArg;
-    /// The borrowed executable arg's type - either `&ExecutableArg` or `&mut ExecutableArg`.
-    /// This has two lifetimes: `'a`, the lifetime of the [`ExecutableArg`], and `'b`, the lifetime
-    /// of the borrow.
+    /// The borrowed executable arg's type - either `&ExecutableArg` or
+    /// `&mut ExecutableArg`. This has two lifetimes: `'a`, the lifetime of the
+    /// [`ExecutableArg`], and `'b`, the lifetime of the borrow.
     type Borrowed<'a: 'b, 'b>
     where
         <Self::EA as ExecutableArg>::Arg<'a>: 'a;
@@ -205,8 +188,7 @@ impl<EA: ExecutableArg> ExecutableArgRef for &mut EA {
 
 pub trait IntoExecutable<Args>: Clone + 'static {
     type Output: 'static;
-    type Mutation: Mutation;
-    type Executable: Executable<Output = Self::Output, Mutation = Self::Mutation> + 'static;
+    type Executable: Executable<Output = Self::Output> + 'static;
 
     fn into_executable(self) -> Self::Executable;
 }
@@ -225,7 +207,6 @@ where
 {
     type Executable = Self;
     type Output = <Self as Executable>::Output;
-    type Mutation = <Self as Executable>::Mutation;
 
     #[inline(always)]
     fn into_executable(self) -> Self::Executable {
@@ -251,7 +232,6 @@ macro_rules! impl_executable {
         {
             type Executable = FunctionStore<Self, ()>;
             type Output = Output;
-            type Mutation = ();
 
             fn into_executable(self) -> Self::Executable {
                 FunctionStore(self, PhantomData)
@@ -264,13 +244,13 @@ macro_rules! impl_executable {
             Function: Fn() -> Output + Clone + 'static
         {
             type Output = Output;
-            type Mutation = ();
+            type Arguments = ();
 
-            fn execute(&self, _: &mut World, _: &TypeMap) -> Self::Output {
+            fn execute(&self, _: &mut World) -> Self::Output {
                 self.0()
             }
-            fn execute_delayed_mutation(&self, _: &World, _: &TypeMap) -> (Self::Output, Self::Mutation) {
-                (self.0(), ())
+            fn execute_immut(&self, _: &World) -> (Self::Output, Box<dyn FnOnce(&mut World) + Send>) {
+                (self.0(), Box::new(|_| {}))
             }
         }
     };
@@ -348,59 +328,59 @@ macro_rules! impl_executable_workaround {
 
     // Arguments
     ($_unused:ident $_unused2:ident $($ty:ident $tyref:ident)*) => {
-        impl<'a, Function, Output, $($ty),*, $($tyref),*> IntoExecutable<($($ty),*, $($tyref),*)> for Function
+        impl<Function, Output, $($ty),*, $($tyref),*> IntoExecutable<($($ty),*, $($tyref),*)> for Function
         where
             $($ty: ExecutableArg + 'static),*,
             $($tyref: ExecutableArgRef<EA = $ty> + 'static),*,
             Output: 'static,
             Function: 'static,
-            Function: Fn($($tyref::Borrowed<'a, 'a>),*) -> Output,
+            Function: for<'a> Fn($($tyref::Borrowed<'a, 'a>),*) -> Output,
             Function: Fn($($tyref),*) -> Output,
             Function: Clone
         {
             type Executable = FunctionStore<Self, ($($ty),*, $($tyref),*)>;
             type Output = Output;
-            #[allow(unused_parens)]
-            type Mutation = ($($ty::Mutation),*);
 
             fn into_executable(self) -> Self::Executable {
                 FunctionStore(self, PhantomData)
             }
         }
 
-        impl<'a, Function, Output, $($ty),*, $($tyref),*> Executable for FunctionStore<Function, ($($ty),*, $($tyref),*)>
+        impl<Function, Output, $($ty),*, $($tyref),*> Executable for FunctionStore<Function, ($($ty),*, $($tyref),*)>
         where
             $($ty: ExecutableArg + 'static),*,
             $($tyref: ExecutableArgRef<EA = $ty> + 'static),*,
             Output: 'static,
             Function: 'static,
-            Function: Fn($($tyref::Borrowed<'a, 'a>),*) -> Output,
+            Function: for<'a> Fn($($tyref::Borrowed<'a, 'a>),*) -> Output,
             Function: Fn($($tyref),*) -> Output,
             Function: Clone
         {
             type Output = Output;
             #[allow(unused_parens)]
-            type Mutation = ($($ty::Mutation),*);
+            type Arguments = ($($ty),*);
 
             #[allow(non_snake_case)]
-            fn execute(&self, world: &mut World, env: &TypeMap) -> Self::Output {
-                let world_extended: &'a World = unsafe { &*(world as *mut World) };
-                let env_extended: &'a TypeMap = unsafe { &*(env as *const TypeMap) };
-                $(let mut $ty = $ty::from_world_and_env(world_extended, env_extended);)*
+            fn execute(&self, world: &mut World) -> Self::Output {
+                let world_extended: &World = unsafe { &*(world as *mut World) };
+
+                $(let mut $ty = $ty::build(world_extended);)*
                 let result = self.0($($tyref::borrow(unsafe { &mut *(&mut $ty as *mut $ty::Arg<'_>) })),*);
-                $(let $ty = $ty.build_mutation();)*
-                $($ty.apply(world);)*
+                $(($ty.on_drop())(world);)*
 
                 result
             }
             #[allow(non_snake_case)]
-            fn execute_delayed_mutation(&self, world: &World, env: &TypeMap) -> (Self::Output, Self::Mutation) {
-                let world_extended: &'a World = unsafe { &*(world as *const World) };
-                let env_extended: &'a TypeMap = unsafe { &*(env as *const TypeMap) };
-                $(let mut $ty = $ty::from_world_and_env(world_extended, env_extended);)*
-                    let result = self.0($($tyref::borrow(unsafe { &mut *(&mut $ty as *mut $ty::Arg<'_>) })),*);
+            fn execute_immut(&self, world: &World) -> (Self::Output, Box<dyn FnOnce(&mut World) + Send>) {
+                let world_extended: &World = unsafe { &*(world as *const World) };
 
-                (result, ($($ty.build_mutation()),*))
+                $(let mut $ty = $ty::build(world_extended);)*
+
+                let result = self.0($($tyref::borrow(unsafe { &mut *(&mut $ty as *mut $ty::Arg<'_>) })),*);
+
+                $(let $ty = $ty.on_drop();)*
+
+                (result, Box::new(move |world| { $( ($ty)(world); )* }))
             }
         }
 
@@ -415,13 +395,13 @@ mod tests {
 
     fn accepts_executable<Args>(func: impl IntoExecutable<Args>) {
         let mut world = World::new();
-        world.add_state(0_u32);
-        world.add_state(1_i32);
-        world.execute(func, None);
+        world.add_singleton(0_u32);
+        world.add_singleton(1_i32);
+        world.execute(func);
     }
 
-    fn executable(_num: &mut State<i32>) {}
-    fn executable2(_num: &State<i32>, _num2: &mut State<u32>) {}
+    fn executable(_num: &mut Singleton<i32>) {}
+    fn executable2(_num: &Singleton<i32>, _num2: &mut Singleton<u32>) {}
     fn executable3() {}
 
     #[test]
@@ -430,7 +410,7 @@ mod tests {
         accepts_executable(executable2);
         accepts_executable(executable3);
         accepts_executable(|| {});
-        accepts_executable(|_: &mut State<i32>| {});
-        accepts_executable(|_: &State<i32>, _: &mut State<i32>| {});
+        accepts_executable(|_: &mut Singleton<i32>| {});
+        accepts_executable(|_: &Singleton<i32>, _: &mut Singleton<i32>| {});
     }
 }

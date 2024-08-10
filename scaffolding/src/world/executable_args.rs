@@ -1,66 +1,70 @@
-//! Standard executable args provided by Scaffolding.
+//! Types that can be used as arguments in [`Executable`]s.
 
 use {
-    crate::{
-        datatypes::TypeMap,
-        world::{ExecutableArg, ImmutableWorld},
-    },
+    crate::{prelude::TypeMap, world::World},
     core::{
         fmt::{Debug, Formatter},
         ops::Deref,
     },
 };
 
-pub struct State<'a, T: 'static> {
+/// Types that can be used as arguments for [`Executable`]s.
+pub trait ExecutableArg {
+    type Arg<'a>: ExecutableArg;
+
+    fn build(world: &World) -> Self::Arg<'_>;
+    fn on_drop(self) -> impl FnOnce(&mut World) + Send + 'static;
+}
+
+// Included executable args below
+
+/// Gets a singleton from the [`World`].
+pub struct Singleton<'a, T: 'static> {
     val: &'a T,
 }
-impl<T: 'static> ExecutableArg for State<'_, T> {
-    type Arg<'a> = State<'a, T>;
-    type Mutation = ();
+impl<T: 'static> ExecutableArg for Singleton<'_, T> {
+    type Arg<'a> = Singleton<'a, T>;
 
-    fn from_world_and_env<'a>(world: &'a ImmutableWorld, _: &'a TypeMap) -> Self::Arg<'a> {
-        State {
-            val: world.get_state(),
+    fn build(world: &World) -> Self::Arg<'_> {
+        Singleton {
+            val: world.get_singleton(),
         }
     }
-    fn build_mutation(self) -> Self::Mutation {}
+    fn on_drop(self) -> impl FnOnce(&mut World) + Send + 'static {
+        |_| {}
+    }
 }
-impl<'a, T> Deref for State<'a, T> {
+impl<'a, T> Deref for Singleton<'a, T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
         self.val
     }
 }
-impl<T: Debug> Debug for State<'_, T> {
+impl<T: Debug> Debug for Singleton<'_, T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
         write!(f, "State {{ val: {:?} }}", self.val)
     }
 }
 
-pub struct Env<'a, T: 'static> {
-    val: &'a T,
-}
-impl<T: 'static> ExecutableArg for Env<'_, T> {
-    type Arg<'a> = State<'a, T>;
-    type Mutation = ();
-
-    fn from_world_and_env<'a>(_: &'a ImmutableWorld, env: &'a TypeMap) -> Self::Arg<'a> {
-        State {
-            val: env.get().unwrap_or_else(|| {
-                panic!(
-                    "Env needed type {}, but the environment didn't have it",
-                    core::any::type_name::<T>(),
-                )
-            }),
-        }
+/// Sets a callback to run after the current [`Executable`] finishes running.
+pub struct PostRunCallback<F: FnOnce(&mut World) + Send + 'static>(Option<F>);
+impl<F: FnOnce(&mut World) + Send + 'static> PostRunCallback<F> {
+    pub fn set_callback(&mut self, func: F) {
+        self.0 = Some(func);
     }
-    fn build_mutation(self) -> Self::Mutation {}
 }
-impl<'a, T> Deref for Env<'a, T> {
-    type Target = T;
+impl<F: FnOnce(&mut World) + Send + 'static> ExecutableArg for PostRunCallback<F> {
+    type Arg<'a> = Self;
 
-    fn deref(&self) -> &Self::Target {
-        self.val
+    fn build(_: &World) -> Self::Arg<'_> {
+        Self(None)
+    }
+    fn on_drop(self) -> impl FnOnce(&mut World) + Send + 'static {
+        move |world| {
+            if let Some(cb) = self.0 {
+                cb(world)
+            }
+        }
     }
 }

@@ -13,7 +13,7 @@ impl PlatformTrait for Platform {
     fn new(world: &mut World) -> Option<Self> {
         match WaylandPlatform::new(world) {
             Some(platform) => {
-                world.add_state(platform);
+                world.add_singleton(platform);
                 Some(Self(LinuxPlatform::Wayland))
             }
             None => todo!("Fallback to X11"),

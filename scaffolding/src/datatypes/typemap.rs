@@ -14,21 +14,25 @@ use {
     },
 };
 
-/// Stores a single instance for some number of types. This acts like a [`std::collections::HashMap`],
-/// except the keys are types and the values are instances of those types. This type uses [`TypeId`]s,
-/// which are already type hashes, so it doesn't perform any hashing itself.
+/// Stores a single instance for some number of types. This acts like a
+/// [`std::collections::HashMap`], except the keys are types and the values are
+/// instances of those types. This type uses [`TypeId`]s, which are already
+/// type hashes, so it doesn't perform any hashing itself.
 ///
-/// Note that types can't be removed from a [`TypeMap`] after they're inserted. This implementation
-/// allows the typemap to use an arena allocator internally, which leads to more optimised code because
-/// the arena gives us memory locality and a dead-simple allocator.
+/// Note that types can't be removed from a [`TypeMap`] after they're inserted.
+/// This implementation allows the typemap to use an arena allocator internally,
+/// which leads to more optimised code because the arena gives us memory
+/// locality and a dead-simple allocator.
 ///
 /// # Niche Behavior
 /// - Creating a 0-capacity type map doesn't allocate anything.
 /// - Inserting the same type twice will overwrite the old type.
-/// - Typemaps will automatically reallocate with twice as many entries and twice as much storage whenever
-///   [`TypeMap::insert`] is called and the typemap is full.
+/// - Typemaps will automatically reallocate with twice as many entries and
+///   twice as much storage whenever [`TypeMap::insert`] is called and the
+///   typemap is full.
 pub struct TypeMap {
-    /// A list of [`TypeMapEntry`]s, for every type that's been inserted into the [`TypeMap`].
+    /// A list of [`TypeMapEntry`]s, for every type that's been inserted into
+    /// the [`TypeMap`].
     entries: Box<[Option<TypeMapEntry>]>,
     /// The buffer used to store all the objects in the [`TypeMap`].
     storage: Box<[u8]>,
@@ -230,6 +234,10 @@ impl TypeMap {
                         type_id,
                         ptr: ptr.cast(),
                         layout: Layout::new::<T>(),
+                        drop: |val| {
+                            let ptr: *mut T = val.cast();
+                            drop(unsafe { ptr.read() });
+                        },
                         collision_slot: None,
                     });
 
@@ -249,6 +257,10 @@ impl TypeMap {
                     type_id,
                     ptr: ptr.cast(),
                     layout: Layout::new::<T>(),
+                    drop: |val| unsafe {
+                        let ptr: *mut T = val.cast();
+                        drop(unsafe { ptr.read() });
+                    },
                     collision_slot: None,
                 });
 
@@ -341,6 +353,13 @@ impl TypeMap {
         }
     }
 }
+impl Drop for TypeMap {
+    fn drop(&mut self) {
+        for entry in self.entries.iter_mut().filter_map(|val| val.as_mut()) {
+            (entry.drop)(entry.ptr.cast())
+        }
+    }
+}
 
 /// Identical to [`TypeId`], except its value is public. Because it stores the same data, this
 /// type can be safely transmuted to/from a regular [`TypeId`], allowing access to its raw value.
@@ -361,12 +380,15 @@ impl From<TypeId> for PubTypeId {
 
 /// Represents one entry in a [`TypeMap`].
 pub struct TypeMapEntry {
-    /// The raw type ID of the type this entry stores. Used to check for collisions.
+    /// The raw type ID of the type this entry stores. Used to check for
+    /// collisions.
     pub type_id: PubTypeId,
     /// A pointer to the type's instance in memory.
     pub ptr: *mut u8,
     /// The layout of the type stored in this entry.
     pub layout: Layout,
+    /// The destructor for this type.
+    pub drop: fn(*mut ()),
     /// If there was a collision, this stores the index of the colliding typemap entry.
     pub collision_slot: Option<usize>,
 }

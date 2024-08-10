@@ -1,28 +1,27 @@
-//! Multithreaded data types and methods for Scaffolding.
+//! Multithreaded utilities for Scaffolding.
 
 use {
     crate::{
-        datatypes::TypeMap,
         utils::AssumeSyncSend,
-        world::{Executable, IntoExecutable, Mutation, World},
+        world::{Executable, IntoExecutable, World},
     },
     std::thread,
 };
 
-pub trait ExecuteInParallel<Args, E, M, O> {
+/// The `execute_in_parallel` method in the [`World`]. This is a separate trait
+/// so that the method can be implemented multiple times, for different numbers
+/// of executables. For example, this is implemented for one executable, but
+/// also tuples of two or more.
+pub trait ExecuteInParallel<Args, E, O> {
+    /// Runs a tuple of executables in parallel. All of the executables will be
+    /// run at the same time, and then any changes they make to the [`World`]
+    /// will be applied after they all finish running.
     fn execute_in_parallel(&mut self, executables: E) -> O;
-    fn execute_in_parallel_delayed_mutation(&self, executables: E) -> (O, M);
 }
-impl<Args, E: IntoExecutable<Args>> ExecuteInParallel<Args, E, E::Mutation, E::Output> for World {
+
+impl<Args, E: IntoExecutable<Args>> ExecuteInParallel<Args, E, E::Output> for World {
     fn execute_in_parallel(&mut self, executables: E) -> E::Output {
-        executables
-            .into_executable()
-            .execute(self, &TypeMap::default())
-    }
-    fn execute_in_parallel_delayed_mutation(&self, executables: E) -> (E::Output, E::Mutation) {
-        executables
-            .into_executable()
-            .execute_delayed_mutation(self, &TypeMap::default())
+        executables.into_executable().execute(self)
     }
 }
 
@@ -54,7 +53,6 @@ macro_rules! impl_execute_in_parallel {
         ExecuteInParallel<
             ($($args),*),
             ($($generic),*),
-            ($($generic::Mutation),*),
             ($($generic::Output),*),
         >
 
@@ -62,7 +60,6 @@ macro_rules! impl_execute_in_parallel {
         where
             $(
                 $generic: IntoExecutable<$args> + Send,
-                $generic::Mutation: Send,
                 $generic::Output: Send
             ),*
 
@@ -80,12 +77,13 @@ macro_rules! impl_execute_in_parallel {
                         // this is still safe because the world is only needed
                         // until the thread finishes running... which happens
                         // in this very method
-                        let world = unsafe { AssumeSyncSend::new(&*self as *const World) };
+                        let world = unsafe { AssumeSyncSend::new(self as *const World) };
 
                         thread::spawn(move || {
                             let world = unsafe { &*world.take() };
                             let executable = tuple_idx!(executables, $generic);
-                            let output = world.execute_delayed_mutation(executable, None);
+                            let executable = executable.into_executable();
+                            let output = executable.execute_immut(world);
                             output
                         })
                     };
@@ -94,37 +92,9 @@ macro_rules! impl_execute_in_parallel {
                     let ($generic, $args) = $generic.join().unwrap();
                 )*
                 $(
-                    $args.apply(self);
+                    ($args)(self);
                 )*
                 ($($generic),*)
-            }
-            fn execute_in_parallel_delayed_mutation
-                (&self, executables: ($($generic),*))
-                -> (($($generic::Output),*), ($($generic::Mutation),*))
-            {
-                $(
-                    let $generic = {
-                        // `thread::spawn` requires a 'static lifetime, so we
-                        // can't use &self here, because we'd have to borrow
-                        // self for 'static
-                        //
-                        // this is still safe because the world is only needed
-                        // until the thread finishes running... which happens
-                        // in this very method
-                        let world = unsafe { AssumeSyncSend::new(&*self as *const World) };
-
-                        thread::spawn(move || {
-                            let world = unsafe { &*world.take() };
-                            let executable = tuple_idx!(executables, $generic);
-                            let output = world.execute_delayed_mutation(executable, None);
-                            output
-                        })
-                    };
-                )*
-                $(
-                    let ($generic, $args) = $generic.join().unwrap();
-                )*
-                (($($generic),*), ($($args),*))
             }
         }
     };
@@ -152,7 +122,9 @@ mod tests {
     #[test]
     fn test_parallel() {
         let mut world = World::new();
-        world.add_state(thread::current().id()).add_state(0u32);
+        world
+            .add_singleton(thread::current().id())
+            .add_singleton(0u32);
 
         world.execute_in_parallel((
             parallel_executable,
@@ -160,11 +132,14 @@ mod tests {
             parallel_executable,
             parallel_executable,
         ));
-        let thread_count: u32 = *world.get_state();
+        let thread_count: u32 = *world.get_singleton();
         assert_eq!(thread_count, 4);
     }
 
-    fn parallel_executable(main_thread_id: &State<ThreadId>, thread_counter: &mut ThreadCounter) {
+    fn parallel_executable(
+        main_thread_id: &Singleton<ThreadId>,
+        thread_counter: &mut ThreadCounter,
+    ) {
         let current_thread_id = thread::current().id();
         println!("Thread {current_thread_id:?} running.");
         assert_ne!(**main_thread_id, current_thread_id);
@@ -179,26 +154,19 @@ mod tests {
     }
     impl ExecutableArg for ThreadCounter {
         type Arg<'a> = Self;
-        type Mutation = Self;
 
-        fn from_world_and_env<'a>(world: &'a ImmutableWorld, _: &'a TypeMap) -> Self::Arg<'a> {
+        fn build(world: &World) -> Self::Arg<'_> {
             Self {
-                count: *world.get_state(),
+                count: *world.get_singleton(),
                 increment: false,
             }
         }
-        fn build_mutation(self) -> Self::Mutation {
-            self
-        }
-    }
-    impl Mutation for ThreadCounter {
-        type Reverse = ();
-
-        fn apply(self, world: &mut World) {
-            if self.increment {
-                *world.get_state_mut::<u32>() += 1;
+        fn on_drop(self) -> impl FnOnce(&mut World) + Send + 'static {
+            move |world| {
+                if self.increment {
+                    *world.get_singleton_mut::<u32>() += 1;
+                }
             }
         }
-        fn build_reverse(&self, _: &World) -> Self::Reverse {}
     }
 }

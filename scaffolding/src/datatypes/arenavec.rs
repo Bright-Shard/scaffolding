@@ -778,6 +778,12 @@ impl<T> Default for ArenaVec<T> {
 }
 impl<T> Drop for ArenaVec<T> {
     fn drop(&mut self) {
+        for val in self.iter_mut() {
+            unsafe {
+                drop((val as *mut T).read());
+            }
+        }
+
         unsafe {
             let buffer = NonNull::new_unchecked(self.buffer);
             Os::decommit(buffer.cast(), self.capacity());

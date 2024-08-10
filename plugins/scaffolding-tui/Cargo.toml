@@ -1,14 +1,10 @@
 [package]
-name = "scaffolding"
+name = "scaffolding-tui"
 version = "0.1.0"
 edition = "2021"
 
-[features]
-default = ["multi"]
-std = []
-debugger = []
-os-allocator = []
-multi = ["std"]
+[dependencies]
+scaffolding.workspace = true
 
 [target.'cfg(target_family="unix")'.dependencies]
 libc = "0.2"

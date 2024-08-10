@@ -24,8 +24,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "scaffolding-tui"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "scaffolding",
+]
+
+[[package]]
 name = "scaffolding-ui"
 version = "0.1.0"
 dependencies = [
  "scaffolding",
+]
+
+[[package]]
+name = "todo"
+version = "0.1.0"
+dependencies = [
+ "scaffolding",
+ "scaffolding-tui",
 ]
