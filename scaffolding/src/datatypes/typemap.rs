@@ -257,7 +257,7 @@ impl TypeMap {
                     type_id,
                     ptr: ptr.cast(),
                     layout: Layout::new::<T>(),
-                    drop: |val| unsafe {
+                    drop: |val| {
                         let ptr: *mut T = val.cast();
                         drop(unsafe { ptr.read() });
                     },

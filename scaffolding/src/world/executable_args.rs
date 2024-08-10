@@ -1,7 +1,7 @@
 //! Types that can be used as arguments in [`Executable`]s.
 
 use {
-    crate::{prelude::TypeMap, world::World},
+    crate::plugin_prelude::*,
     core::{
         fmt::{Debug, Formatter},
         ops::Deref,

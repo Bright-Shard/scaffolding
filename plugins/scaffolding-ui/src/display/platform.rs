@@ -15,6 +15,7 @@ pub trait PlatformTrait: Sized {
 // Platform implementations
 
 #[cfg(target_os = "linux")]
+#[allow(dead_code)] // TODO: Remove this when the linux code is more complete
 mod linux;
 #[cfg(target_os = "linux")]
 pub use linux::Platform;

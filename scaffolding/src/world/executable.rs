@@ -89,7 +89,7 @@ impl Clone for Box<dyn UnsizedExecutable> {
 /// Executable args can only be borrowed by executables, not owned. This is
 /// needed so that the executable arg can be passed to the executable without
 /// being dropped; after it's passed to the executable, it's used to build the
-/// executable's mutations (see [`ExecutableArg::build_mutation`]), so it can't
+/// executable's mutation function (see [`ExecutableArg::on_drop`]), so it can't
 /// be dropped until then.
 ///
 /// This creates a new issue, however, because now executables can take both
@@ -99,11 +99,11 @@ impl Clone for Box<dyn UnsizedExecutable> {
 /// ```rust
 /// use scaffolding::prelude::*;
 ///
-/// fn executable(counter_state: &State<i32>, app: &mut Env<u32>) {
+/// fn executable(int: &Singleton<i32>, float: &mut Singleton<f32>) {
 ///   // Some very important code here
 /// }
 ///
-/// fn also_an_executable(app: &mut Env<u32>, counter_state: &State<i32>) {
+/// fn also_an_executable(float: &mut Singleton<f32>, int: &Singleton<i32>) {
 ///   // Some very important code here
 /// }
 /// ```
