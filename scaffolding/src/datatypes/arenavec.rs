@@ -9,9 +9,9 @@ use {
         borrow::{Borrow, BorrowMut},
         cell::Cell,
         cmp::Ordering,
+        fmt::Write,
         mem::{self, MaybeUninit},
-        ops::{Bound, Deref, DerefMut, RangeBounds},
-        ops::{Index, IndexMut},
+        ops::{Bound, Deref, DerefMut, Index, IndexMut, RangeBounds},
         ptr::{self, NonNull},
         slice::{self, SliceIndex},
     },
@@ -411,7 +411,6 @@ impl<T> ArenaVec<T> {
             idx: 0,
         }
     }
-
     pub fn iter_mut(&mut self) -> IterMut<'_, T> {
         IterMut {
             arena_vec: self,
@@ -425,6 +424,7 @@ impl<T> ArenaVec<T> {
     pub fn as_mut_slice(&mut self) -> &mut [T] {
         unsafe { slice::from_raw_parts_mut(self.buffer, self.len()) }
     }
+
     // This isn't using the trait because it can fail
     pub fn try_extend<I: IntoIterator<Item = T>>(&mut self, iter: I) -> Result<()> {
         let iter = iter.into_iter();
@@ -647,6 +647,14 @@ impl<T> ArenaVec<T> {
         s
     }
 
+    pub fn spare_capacity(&self) -> &[MaybeUninit<T>] {
+        unsafe {
+            slice::from_raw_parts(
+                self.buffer.add(self.len()) as *mut MaybeUninit<T>,
+                self.capacity() - self.len(),
+            )
+        }
+    }
     pub fn spare_capacity_mut(&mut self) -> &mut [MaybeUninit<T>] {
         unsafe {
             slice::from_raw_parts_mut(
@@ -674,25 +682,36 @@ impl<T> ArenaVec<T> {
         self.resize_with(new_len, f)
     }
 
-    pub fn try_extend_from_slice(&mut self, other: &[T]) -> Result<()>
+    pub fn try_extend_from_slice(&self, other: &[T]) -> Result<()>
     where
         T: Clone,
     {
-        // Inefficient, but it works
-        for val in other {
-            self.try_push(val.clone())?;
+        let new_len = self.len() + other.len();
+        self.try_ensure_capacity(new_len)?;
+
+        let ptr = self.spare_capacity().as_ptr().cast_mut().cast::<T>();
+        unsafe {
+            ptr.copy_from(other.as_ptr(), other.len());
         }
+
+        self.len.set(new_len);
+
         Ok(())
     }
 
-    pub fn extend_from_slice(&mut self, other: &[T])
+    pub fn extend_from_slice(&self, other: &[T])
     where
         T: Clone,
     {
-        // Inefficient, but it works
-        for val in other {
-            self.push(val.clone());
+        let new_len = self.len() + other.len();
+        self.ensure_capacity(new_len);
+
+        let ptr = self.spare_capacity().as_ptr().cast_mut().cast::<T>();
+        unsafe {
+            ptr.copy_from(other.as_ptr(), other.len());
         }
+
+        self.len.set(new_len);
     }
 
     pub fn try_extend_from_within<R>(&mut self, src: R) -> Result<()>
@@ -880,13 +899,25 @@ where
     T: Copy + 'a,
 {
     fn extend<I: IntoIterator<Item = &'a T>>(&mut self, iter: I) {
+        <&Self>::extend(&mut &*self, iter)
+    }
+}
+impl<T> Extend<T> for ArenaVec<T> {
+    fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
+        <&Self>::extend(&mut &*self, iter)
+    }
+}
+impl<'a, T> Extend<&'a T> for &ArenaVec<T>
+where
+    T: Copy + 'a,
+{
+    fn extend<I: IntoIterator<Item = &'a T>>(&mut self, iter: I) {
         for item in iter {
             self.push(*item);
         }
     }
 }
-
-impl<T> Extend<T> for ArenaVec<T> {
+impl<T> Extend<T> for &ArenaVec<T> {
     fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
         for item in iter {
             self.push(item);
@@ -1001,6 +1032,18 @@ impl<T> IntoIterator for ArenaVec<T> {
             arena_vec: self,
             idx: 0,
         }
+    }
+}
+
+impl Write for &ArenaVec<u8> {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        self.extend_from_slice(s.as_bytes());
+        Ok(())
+    }
+}
+impl Write for ArenaVec<u8> {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        <&Self>::write_str(&mut &*self, s)
     }
 }
 
