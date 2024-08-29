@@ -1,17 +1,55 @@
-use crate::{prelude::Terminal, Colour, TuiElement};
+use crate::{prelude::Terminal, Colour};
 
-pub struct Text {
+pub trait Shape {
+    type Output;
+
+    fn draw(self, terminal: &Terminal) -> Self::Output;
+}
+
+pub struct Text<S: AsRef<str>> {
     pub x: u16,
     pub y: u16,
+    pub max_width: Option<u16>,
+    pub max_height: Option<u16>,
     pub fg: Option<Colour>,
     pub bg: Option<Colour>,
-    pub text: String,
+    pub text: S,
 }
-impl TuiElement for Text {
+impl<S: AsRef<str>> Shape for Text<S> {
     type Output = ();
 
     fn draw(self, terminal: &Terminal) -> Self::Output {
-        terminal.render_string(&self.text, (self.x, self.y), self.fg, self.bg);
+        let string = self.text.as_ref();
+
+        if let Some(max_width) = self.max_width {
+            let max_width = max_width as usize;
+            let max_height = self.max_height.unwrap_or(u16::MAX);
+            let max_y = self.y.saturating_add(max_height);
+
+            if string.len() > max_width {
+                let mut base = 0;
+                let mut y = self.y;
+
+                while base < string.len() {
+                    terminal.render_string(
+                        &string[base..(base + max_width).clamp(0, string.len())],
+                        (self.x, y),
+                        self.fg,
+                        self.bg,
+                    );
+
+                    base += max_width;
+                    y += 1;
+
+                    if y > max_y {
+                        break;
+                    }
+                }
+
+                return;
+            }
+        }
+        terminal.render_string(self.text.as_ref(), (self.x, self.y), self.fg, self.bg);
     }
 }
 
@@ -28,7 +66,7 @@ pub struct Rect {
     /// A colour to fill the rectangle with.
     pub colour: Option<Colour>,
 }
-impl TuiElement for Rect {
+impl Shape for Rect {
     type Output = ();
 
     fn draw(self, terminal: &Terminal) -> Self::Output {
@@ -50,7 +88,7 @@ pub struct Border {
     pub bg: Option<Colour>,
     pub style: BorderStyle,
 }
-impl TuiElement for Border {
+impl Shape for Border {
     type Output = ();
 
     fn draw(self, terminal: &Terminal) -> Self::Output {

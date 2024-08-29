@@ -1,13 +1,41 @@
-use {scaffolding::prelude::*, scaffolding_tui::prelude::*};
+use {
+    scaffolding::prelude::*,
+    scaffolding_tui::{
+        prelude::*,
+        widgets::{text_input, SomeWidget},
+    },
+};
+
+struct AppState {
+    key_log: String,
+}
+
+enum AppMsg {
+    KeyPress(String),
+}
 
 fn main() {
     let mut world = World::new();
-    world.add_plugin(ScaffoldingTuiPlugin::default());
+    world
+        .add_plugin(TuiPlugin::default())
+        .add_singleton(AppState {
+            key_log: String::from("Key log: "),
+        })
+        .add_msg_handler(app_msg_handler);
 
     TuiRunloop::default().start(world, app_main);
 }
 
-fn app_main(terminal: &Singleton<Terminal>, msg_sender: &mut TerminalMsgSender) {
+fn app_main(
+    terminal: &Singleton<Terminal>,
+    msg_sender: &MsgSender,
+    app: &App,
+    app_state: &Singleton<AppState>,
+    states_storage: &StatesStorage,
+) {
+    let buffer = states_storage.get(uniq_key!());
+    app.draw(text_input(buffer, uniq_key!()).x(50).width(30).height(3));
+
     terminal.draw(Border {
         x: 0,
         y: 0,
@@ -22,6 +50,8 @@ fn app_main(terminal: &Singleton<Terminal>, msg_sender: &mut TerminalMsgSender) 
         y: 1,
         fg: None,
         bg: None,
+        max_width: None,
+        max_height: None,
         text: format!("Terminal size: {:?}", terminal.size),
     });
     terminal.draw(Text {
@@ -29,7 +59,30 @@ fn app_main(terminal: &Singleton<Terminal>, msg_sender: &mut TerminalMsgSender) 
         y: 2,
         fg: None,
         bg: None,
+        max_width: None,
+        max_height: None,
         text: format!("Mouse pos: {:?}", terminal.mouse_pos),
+    });
+    terminal.draw(Text {
+        x: 1,
+        y: 3,
+        fg: None,
+        bg: None,
+        max_width: None,
+        max_height: None,
+        text: format!(
+            "Pressed mouse buttons: {:?}",
+            terminal.pressed_mouse_buttons
+        ),
+    });
+    terminal.draw(Text {
+        x: 1,
+        y: 4,
+        fg: None,
+        bg: None,
+        max_width: Some(40),
+        max_height: None,
+        text: &app_state.key_log,
     });
     terminal.draw(Rect {
         x: terminal.mouse_pos.0,
@@ -40,8 +93,18 @@ fn app_main(terminal: &Singleton<Terminal>, msg_sender: &mut TerminalMsgSender) 
     });
 
     if terminal.pressed_keys.contains(&Key::Escape) {
-        msg_sender.send_exit_tui_runloop();
+        app.exit();
     }
+    for key in terminal.pressed_keys.iter() {
+        msg_sender.send(AppMsg::KeyPress(key.to_string()));
+    }
+}
 
-    msg_sender.send_update();
+fn app_msg_handler(world: &mut World, msg: Msg<AppMsg>) {
+    match msg.read() {
+        AppMsg::KeyPress(key) => {
+            let state: &mut AppState = world.get_singleton_mut();
+            state.key_log += &key;
+        }
+    }
 }

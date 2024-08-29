@@ -1,38 +1,47 @@
-pub mod keys;
+pub mod input;
+pub mod msg;
 pub mod os;
 pub mod runloop;
 pub mod shapes;
 pub mod terminal;
+pub mod widgets;
 
 pub mod prelude {
     pub use crate::{
-        keys::Key, runloop::TuiRunloop, shapes::*, terminal::Terminal, Colour,
-        ScaffoldingTuiPlugin, TerminalMsgSender,
+        input::Key, msg::TuiMsg, runloop::TuiRunloop, shapes::*, terminal::Terminal, App, Colour,
+        TuiPlugin,
     };
 }
 
-use {scaffolding::plugin_prelude::*, terminal::Terminal};
+use {msg::TuiMsg, scaffolding::plugin_prelude::*, terminal::Terminal, widgets::SomeWidget};
 
 #[derive(Default)]
-pub struct ScaffoldingTuiPlugin {}
-impl Plugin for ScaffoldingTuiPlugin {
+pub struct TuiPlugin {}
+impl Plugin for TuiPlugin {
     fn load(&mut self, world: &mut World) {
-        world.add_singleton(Terminal::default());
-        world.set_msg_handler(|world, _: MsgUpdateTerminal| {
-            let terminal: &mut Terminal = world.get_singleton_mut();
-            terminal.update()
-        });
-        world.set_msg_handler(|world, _: MsgExitTuiRunloop| {
-            let terminal: &mut Terminal = world.get_singleton_mut();
-            terminal.exit = true
-        });
+        world
+            .add_singleton(Terminal::default())
+            .add_msg_handler(msg::tui_msg_handler);
     }
 }
 
-pub trait TuiElement {
-    type Output;
+pub struct App<'a>(&'a World);
+impl ExecutableArg for App<'_> {
+    type Arg<'a> = App<'a>;
 
-    fn draw(self, terminal: &Terminal) -> Self::Output;
+    fn build(world: &World) -> Self::Arg<'_> {
+        App(world)
+    }
+    fn drop(self, _: &World) {}
+}
+impl App<'_> {
+    pub fn draw<'a, W: SomeWidget<'a>>(&self, widget: W) -> W::Output {
+        widget.build().execute(self.0)
+    }
+
+    pub fn exit(&self) {
+        self.0.send_msg(TuiMsg::ExitRunloop);
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -51,44 +60,5 @@ impl Colour {
 
     pub const fn new(r: u8, g: u8, b: u8) -> Self {
         Self { r, g, b }
-    }
-}
-
-/// A message to update the [`Terminal`] singleton.
-pub struct MsgUpdateTerminal;
-
-/// A message to stop the runloop started with [`runloop::TuiRunloop`].
-pub struct MsgExitTuiRunloop;
-
-#[derive(Default)]
-pub struct TerminalMsgSender {
-    update: bool,
-    exit_tui_runloop: bool,
-}
-impl TerminalMsgSender {
-    pub fn send_update(&mut self) {
-        self.update = true
-    }
-    pub fn send_exit_tui_runloop(&mut self) {
-        self.exit_tui_runloop = true
-    }
-}
-impl ExecutableArg for TerminalMsgSender {
-    type Arg<'a> = Self;
-
-    fn build(_: &World) -> Self::Arg<'_> {
-        Self::default()
-    }
-
-    fn on_drop(self) -> impl FnOnce(&mut World) + Send + 'static {
-        move |world| {
-            if self.update {
-                world.send_msg(MsgUpdateTerminal);
-            }
-
-            if self.exit_tui_runloop {
-                world.send_msg(MsgExitTuiRunloop);
-            }
-        }
     }
 }

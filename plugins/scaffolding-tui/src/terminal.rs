@@ -1,13 +1,22 @@
 use {
-    crate::{keys::Key, os, Colour, TuiElement},
+    crate::{input::*, os, shapes::Shape, Colour},
     scaffolding::{datatypes::ArenaVec, utils::MemoryAmount},
     std::{
+        cell::Cell,
         collections::HashSet,
         fmt::Write as _,
         io::{stdin, stdout, Read, Write as _},
         str,
+        sync::atomic::{AtomicBool, Ordering},
     },
 };
+
+/// Tracks if a [`Terminal`] was already dropped. When dropped, the [`Terminal`]
+/// issues several commands to the terminal emulator to "reset" it to its normal
+/// state (See [`Terminal::on_drop`] for more info). Running this code twice,
+/// however, can cause weird bugs in the terminal emulator, so we first check
+/// this boolean to make sure the drop code is only run once.
+static TERMINAL_DROPPED: AtomicBool = AtomicBool::new(false);
 
 /// Handles communicating with the terminal using ANSI escape sequences to
 /// query input and render the TUI.
@@ -16,14 +25,18 @@ pub struct Terminal {
     pub size: (u16, u16),
     /// The current location of the mouse.
     pub mouse_pos: (u16, u16),
+    /// Currently pressed mouse keys.
+    pub pressed_mouse_buttons: HashSet<u8>,
+    /// Scroll direction.
+    pub scroll_direction: Option<ScrollDirection>,
     /// Any actively held modifier keys.
-    pub mouse_modifiers: MouseModifiers,
-    /// What the mouse is currently doing.
-    pub mouse_state: MouseState,
+    pub modifier_keys: ModifierKeys,
     /// Keys currently held by the user.
     pub pressed_keys: HashSet<Key>,
     /// If we should exit the app.
     pub exit: bool,
+    /// The location to move the cursor to, if one was set.
+    pub target_cursor_location: Cell<Option<(u16, u16)>>,
     /// The buffer for reading from stdin.
     input_buffer: Vec<u8>,
     /// The buffer for writing to stdout.
@@ -31,7 +44,7 @@ pub struct Terminal {
 }
 impl Terminal {
     #[inline(always)]
-    pub fn draw<E: TuiElement>(&self, element: E) -> E::Output {
+    pub fn draw<E: Shape>(&self, element: E) -> E::Output {
         element.draw(self)
     }
 
@@ -84,6 +97,12 @@ impl Terminal {
     pub fn update(&mut self) {
         print!("\x1B[0m\x1B[2J\x1B[H");
         stdout().flush().unwrap();
+        if let Some((x, y)) = self.target_cursor_location.take() {
+            // Move cursor
+            write!(&self.output_buffer, "\x1B[{};{}H", y + 1, x + 1).unwrap();
+            // Show cursor
+            write!(&self.output_buffer, "\x1B[?25h").unwrap();
+        }
         stdout().write_all(&self.output_buffer).unwrap();
         stdout().flush().unwrap();
         self.output_buffer.clear();
@@ -92,6 +111,9 @@ impl Terminal {
 
         // Get terminal size
         self.size = os::get_terminal_size();
+
+        // Clear old user input
+        self.pressed_keys.clear();
 
         // Handle user input
         self.input_buffer.resize(10, 0);
@@ -184,46 +206,57 @@ impl Terminal {
                                 }
 
                                 // modifier bits
-                                self.mouse_modifiers.shift = (btn & 0b0000_0100) != 0;
-                                self.mouse_modifiers.meta = (btn & 0b0000_1000) != 0;
-                                self.mouse_modifiers.control = (btn & 0b0001_0000) != 0;
+                                self.modifier_keys.shift = (btn & 0b0000_0100) != 0;
+                                self.modifier_keys.meta = (btn & 0b0000_1000) != 0;
+                                self.modifier_keys.control = (btn & 0b0001_0000) != 0;
 
                                 if button_number == 4 {
-                                    self.mouse_state = MouseState::ScrollBack;
+                                    self.scroll_direction = Some(ScrollDirection::Backwards);
                                 } else if button_number == 5 {
-                                    self.mouse_state = MouseState::ScrollForward;
+                                    self.scroll_direction = Some(ScrollDirection::Forwards);
                                 } else {
                                     // -1 cause it starts indexing pixels at 1
                                     self.mouse_pos = (x - 1, y - 1);
-                                    self.mouse_state = if clicked {
-                                        MouseState::Pressed(button_number as _)
+                                    if clicked {
+                                        self.pressed_mouse_buttons.insert(button_number as u8);
                                     } else {
-                                        MouseState::Released
-                                    };
+                                        self.pressed_mouse_buttons.remove(&(button_number as u8));
+                                    }
                                 }
                             }
 
                             // Arrow keys
                             b'A' => {
-                                println!("Got arrow up")
+                                self.pressed_keys.insert(Key::ArrowUp);
                             }
                             b'B' => {
-                                println!("Got arrow down")
+                                self.pressed_keys.insert(Key::ArrowDown);
                             }
                             b'C' => {
-                                println!("Got arrow right")
+                                self.pressed_keys.insert(Key::ArrowRight);
                             }
                             b'D' => {
-                                println!("Got arrow left")
+                                self.pressed_keys.insert(Key::ArrowLeft);
                             }
 
                             // Group of special keys that end with ~
                             other if stdin.next().map(|(_, byte)| byte) == Some(b'~') => {
                                 match other {
-                                    b'5' => println!("Got page up"),
-                                    b'6' => println!("Got page down"),
-                                    b'1' | b'7' => println!("Got home key"),
-                                    b'4' | b'8' => println!("Got end key"),
+                                    b'5' => {
+                                        self.pressed_keys.insert(Key::PageUp);
+                                    }
+                                    b'6' => {
+                                        self.pressed_keys.insert(Key::PageDown);
+                                    }
+                                    b'1' | b'7' => {
+                                        self.pressed_keys.insert(Key::Home);
+                                    }
+                                    b'4' | b'8' => {
+                                        self.pressed_keys.insert(Key::End);
+                                    }
+                                    b'3' => {
+                                        self.pressed_keys.insert(Key::Delete);
+                                    }
                                     _ => eprintln!(
                                         "WARN: Unknown special key escape sequence: ESC[{}~",
                                         other as char
@@ -233,16 +266,24 @@ impl Terminal {
 
                             // Home and end (note they can also be sent in the
                             // group above)
-                            b'H' => println!("Got home key"),
-                            b'F' => println!("Got end key"),
+                            b'H' => {
+                                self.pressed_keys.insert(Key::Home);
+                            }
+                            b'F' => {
+                                self.pressed_keys.insert(Key::End);
+                            }
                             b'O' => {
                                 let Some((_, next)) = stdin.next() else {
                                     println!("WARN: Got incomplete control key sequence ESC[O");
                                     continue;
                                 };
                                 match next {
-                                    b'H' => println!("Got home key"),
-                                    b'F' => println!("Got end key"),
+                                    b'H' => {
+                                        self.pressed_keys.insert(Key::Home);
+                                    }
+                                    b'F' => {
+                                        self.pressed_keys.insert(Key::End);
+                                    }
                                     _ => println!(
                                         "WARN: Unknown special key escape sequence: ESC[O{}",
                                         next as char
@@ -276,12 +317,43 @@ impl Terminal {
                         eprintln!("WARN: Got invalid UTF-8 from the terminal");
                         continue;
                     };
-                    println!("Got char {}", text);
+                    for char in text.chars() {
+                        if char == '\x7F' {
+                            self.pressed_keys.insert(Key::Backspace);
+                        } else {
+                            self.pressed_keys.insert(Key::Text(char));
+                        }
+                    }
                 }
             }
         }
 
         os::set_blocking(true);
+    }
+
+    /// Called when the [`Terminal`] is dropped, or when the program panics, to
+    /// reset the terminal & undo all the things Scaffolding changed.
+    pub fn on_drop() {
+        // Running this code twice can cause weird terminal issues
+        if TERMINAL_DROPPED.swap(true, Ordering::Release) {
+            return;
+        }
+
+        // disable all of the things we enabled in [`INITIAL_COMMANDS`]
+        const FINAL_COMMANDS: &str = concat!(
+            // show the cursor
+            "\x1B[?25h",
+            // leave the alternate buffer
+            "\x1B[?1049l",
+            // disable mouse location reporting
+            "\x1B[?1003l",
+            // disable SGR extended mouse location reporting
+            "\x1B[?1006l",
+        );
+        stdout().write_all(FINAL_COMMANDS.as_bytes()).unwrap();
+        stdout().flush().unwrap();
+
+        os::set_raw_mode(false);
     }
 }
 impl Default for Terminal {
@@ -309,13 +381,26 @@ impl Default for Terminal {
         stdout().write_all(INITIAL_COMMANDS.as_bytes()).unwrap();
         stdout().flush().unwrap();
 
+        // Set a panic handler to leave the alternate buffer before printing
+        // the panic message
+        // Otherwise the message will be printed inside the alternate buffer,
+        // and then we leave the alternate buffer when Terminal is dropped,
+        // so the message can't be seen.
+        let normal_panic_handler = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |panic_info| {
+            Terminal::on_drop();
+            normal_panic_handler(panic_info);
+        }));
+
         Self {
             size: (0, 0),
             mouse_pos: (0, 0),
-            mouse_modifiers: MouseModifiers::default(),
-            mouse_state: MouseState::Released,
+            modifier_keys: ModifierKeys::default(),
+            scroll_direction: None,
+            pressed_mouse_buttons: HashSet::default(),
             pressed_keys: HashSet::default(),
             exit: false,
+            target_cursor_location: Cell::new(None),
             input_buffer: Vec::with_capacity(10),
             output_buffer: ArenaVec::with_reserved_memory(MemoryAmount::Megabytes(1).into_bytes()),
         }
@@ -323,37 +408,6 @@ impl Default for Terminal {
 }
 impl Drop for Terminal {
     fn drop(&mut self) {
-        // disable all of the things we enabled in [`INITIAL_COMMANDS`]
-        const FINAL_COMMANDS: &str = concat!(
-            // show the cursor
-            "\x1B[?25h",
-            // leave the alternate buffer
-            "\x1B[?1049l",
-            // disable mouse location reporting
-            "\x1B[?1003l",
-            // disable SGR extended mouse location reporting
-            "\x1B[?1006l",
-        );
-        stdout().write_all(FINAL_COMMANDS.as_bytes()).unwrap();
-        stdout().flush().unwrap();
-
-        os::set_raw_mode(false);
+        Self::on_drop();
     }
-}
-
-#[derive(Default)]
-pub struct MouseModifiers {
-    pub shift: bool,
-    pub meta: bool,
-    pub control: bool,
-}
-pub enum MouseState {
-    Pressed(u8),
-    Released,
-    /// Scroll so text that was previously off the top of the screen is now
-    /// visible.
-    ScrollBack,
-    /// Scroll so text that was previously off the bottom of the screen is now
-    /// visible.
-    ScrollForward,
 }

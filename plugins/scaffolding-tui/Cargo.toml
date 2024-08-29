@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 scaffolding.workspace = true
+unicode-segmentation = "1.11"
 
 [target.'cfg(target_family="unix")'.dependencies]
 libc = "0.2"

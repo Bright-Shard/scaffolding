@@ -5,10 +5,15 @@ edition = "2021"
 
 [features]
 default = ["multi"]
+multi = ["std"]
 std = []
 debugger = []
 os-allocator = []
-multi = ["std"]
 
 [target.'cfg(target_family="unix")'.dependencies]
 libc = "0.2"
+
+[dependencies]
+ahash = { version = "0.8.11", default-features = false, features = [
+    "compile-time-rng",
+] }

@@ -128,16 +128,20 @@ impl TypeMap {
     }
 
     pub fn get<T: Any>(&self) -> Option<&T> {
-        match self.get_raw(PubTypeId::of::<T>()) {
+        match self._get(PubTypeId::of::<T>()) {
             Some(ptr) => unsafe { Some(&*ptr.cast()) },
             None => None,
         }
     }
     pub fn get_mut<T: Any>(&mut self) -> Option<&mut T> {
-        match self.get_raw(PubTypeId::of::<T>()) {
+        match self._get(PubTypeId::of::<T>()) {
             Some(ptr) => unsafe { Some(&mut *ptr.cast()) },
             None => None,
         }
+    }
+    pub fn get_raw(&self, type_id: PubTypeId) -> Option<NonNull<()>> {
+        self._get(type_id)
+            .map(|ptr| unsafe { NonNull::new_unchecked(ptr.cast()) })
     }
 
     #[inline(always)]
@@ -233,7 +237,6 @@ impl TypeMap {
                     *entry = Some(TypeMapEntry {
                         type_id,
                         ptr: ptr.cast(),
-                        layout: Layout::new::<T>(),
                         drop: |val| {
                             let ptr: *mut T = val.cast();
                             drop(unsafe { ptr.read() });
@@ -256,7 +259,6 @@ impl TypeMap {
                 *entry = Some(TypeMapEntry {
                     type_id,
                     ptr: ptr.cast(),
-                    layout: Layout::new::<T>(),
                     drop: |val| {
                         let ptr: *mut T = val.cast();
                         drop(unsafe { ptr.read() });
@@ -324,7 +326,7 @@ impl TypeMap {
         }
     }
 
-    fn get_raw(&self, type_id: PubTypeId) -> Option<*mut u8> {
+    fn _get(&self, type_id: PubTypeId) -> Option<*mut u8> {
         let idx = type_id.val.0 as usize % self.entries.len();
         let entry = unsafe { self.entries.get_unchecked(idx).as_ref() };
 
@@ -382,15 +384,13 @@ impl From<TypeId> for PubTypeId {
 pub struct TypeMapEntry {
     /// The raw type ID of the type this entry stores. Used to check for
     /// collisions.
-    pub type_id: PubTypeId,
+    type_id: PubTypeId,
     /// A pointer to the type's instance in memory.
-    pub ptr: *mut u8,
-    /// The layout of the type stored in this entry.
-    pub layout: Layout,
+    ptr: *mut u8,
     /// The destructor for this type.
-    pub drop: fn(*mut ()),
+    drop: fn(*mut ()),
     /// If there was a collision, this stores the index of the colliding typemap entry.
-    pub collision_slot: Option<usize>,
+    collision_slot: Option<usize>,
 }
 
 #[cfg(test)]

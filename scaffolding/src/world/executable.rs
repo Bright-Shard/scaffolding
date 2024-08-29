@@ -1,74 +1,52 @@
 use {
-    crate::world::{ExecutableArg, World},
+    crate::{
+        self as scaffolding,
+        datatypes::uniq::{uniq_key, UniqKey},
+        world::{ExecutableArg, World},
+    },
     alloc::boxed::Box,
-    core::{any::Any, marker::PhantomData, ops::Fn},
+    core::{
+        any::Any,
+        cell::UnsafeCell,
+        marker::PhantomData,
+        ops::{Deref, DerefMut, Fn},
+    },
 };
 
 /// Executables are functions that get data from the [`World`].
-pub trait Executable: Clone + 'static {
+pub trait Executable<'a>: Sized + 'a {
     /// The return type.
-    type Output: 'static;
-    /// The executable's arguments.
-    type Arguments: 'static;
+    type Output: 'a;
 
-    fn execute(&self, world: &mut World) -> Self::Output;
-    // TODO: Replace with `impl FnOnce(&mut World) + Send + 'static` once
-    // precise capturing is implemented:
-    // https://github.com/rust-lang/rust/issues/123432
-    fn execute_immut(&self, world: &World) -> (Self::Output, Box<dyn FnOnce(&mut World) + Send>);
+    /// Run this executable in the give [`World`]. Note that this will not apply
+    /// any messages that this executable sent to the world; use
+    /// [`World::apply_msgs`] for that.
+    fn execute(&self, world: &World) -> Self::Output;
 }
 
 /// A version of [`Executable`] that can be used as a trait object. Normal
-/// executables require [`Clone`], which requires [`Sized`], and have
-/// associated types for their output and mutations. This type has none of
-/// those requirements, allowing it to be simply stored as a
-/// `Box<dyn UnsizedExecutable>`. It's also automatically implemented for all
-/// executables, which means any executable can be upcasted to a trait object
-/// with this trait.
+/// executables must be [`Sized`], and have associated types for their output
+/// and arguments. This type has none of those requirements, allowing it to be
+/// simply stored as a `Box<dyn UnsizedExecutable>`. It's also automatically
+/// implemented for all executables, which means any executable can be upcasted
+/// to a trait object with this trait.
 ///
 /// Because this trait doesn't have associated type, it relies heavily on trait
 /// objects and dynamic typing, which adds overhead. Thus, [`Executable`]
 /// should be preferred and used where possible.
-pub trait UnsizedExecutable {
+pub trait UnsizedExecutable<'a>: 'a {
     /// The same as [`Executable::execute`], except this trait doesn't have an
     /// associated `Output` type, so the output has to be returned as an
     /// [`Any`] trait object.
-    fn execute_unsized(&self, world: &mut World) -> Box<dyn Any>;
-
-    fn execute_immut_unsized(
-        &self,
-        world: &World,
-    ) -> (Box<dyn Any>, Box<dyn FnOnce(&mut World) + Send>);
-
-    /// This replaces the [`Clone`] requirement in [`Executable`], which means
-    /// this type doesn't have to be sized. Because this type is unsized, the
-    /// cloned executable has to be returned as a trait object, so this method
-    /// returns another [`UnsizedExecutable`].
-    fn dyn_clone(&self) -> Box<dyn UnsizedExecutable>;
+    fn execute_unsized(&self, world: &World) -> Box<dyn Any>;
 }
-impl<E, Output> UnsizedExecutable for E
+impl<'a, E, Output> UnsizedExecutable<'a> for E
 where
     Output: 'static,
-    E: Executable<Output = Output>,
+    E: Executable<'a, Output = Output>,
 {
-    fn execute_unsized(&self, world: &mut World) -> Box<dyn Any> {
+    fn execute_unsized(&self, world: &World) -> Box<dyn Any> {
         Box::new(self.execute(world))
-    }
-    fn execute_immut_unsized(
-        &self,
-        world: &World,
-    ) -> (Box<dyn Any>, Box<dyn FnOnce(&mut World) + Send>) {
-        let (output, apply) = self.execute_immut(world);
-
-        (Box::new(output), Box::new(apply))
-    }
-    fn dyn_clone(&self) -> Box<dyn UnsizedExecutable> {
-        Box::new(self.clone())
-    }
-}
-impl Clone for Box<dyn UnsizedExecutable> {
-    fn clone(&self) -> Self {
-        self.dyn_clone()
     }
 }
 
@@ -186,32 +164,64 @@ impl<EA: ExecutableArg> ExecutableArgRef for &mut EA {
     }
 }
 
-pub trait IntoExecutable<Args>: Clone + 'static {
-    type Output: 'static;
-    type Executable: Executable<Output = Self::Output> + 'static;
+pub trait IntoExecutable<'a, Args>: 'a {
+    type Output: 'a;
+    type Executable: Executable<'a, Output = Self::Output> + 'a;
 
     fn into_executable(self) -> Self::Executable;
 }
+impl<'a, E: Executable<'a> + 'a> IntoExecutable<'a, ()> for E {
+    type Output = E::Output;
+    type Executable = E;
 
-#[repr(transparent)]
-pub struct FunctionStore<Func: Clone, Args>(pub Func, pub PhantomData<Args>);
-impl<Func: Clone, Args> Clone for FunctionStore<Func, Args> {
-    fn clone(&self) -> Self {
-        Self(self.0.clone(), PhantomData)
-    }
-}
-
-impl<Args: 'static, F: Clone> IntoExecutable<Args> for FunctionStore<F, Args>
-where
-    Self: Executable + 'static,
-{
-    type Executable = Self;
-    type Output = <Self as Executable>::Output;
-
-    #[inline(always)]
     fn into_executable(self) -> Self::Executable {
         self
     }
+}
+
+pub trait IntoStatefulExecutable<'a, Args> {
+    type Output: 'a;
+    type State: 'a;
+    type KeyedExecutable: Executable<'a, Output = Self::Output> + 'a
+    where
+        Self::State: Default;
+    type StateExecutable: Executable<'a, Output = Self::Output> + 'a;
+
+    fn into_executable_with_key(self, key: UniqKey) -> Self::KeyedExecutable
+    where
+        Self::State: Default;
+    fn into_executable_with_state(self, state: Self::State) -> Self::StateExecutable;
+    fn run_with_state(self, state: &mut Self::State, world: &World) -> Self::Output;
+}
+
+#[repr(transparent)]
+pub struct StatelessExecutable<'a, Func: 'a, Args>(pub Func, pub PhantomData<&'a Args>);
+
+#[repr(transparent)]
+pub struct State<'a, T>(pub &'a mut T);
+impl<T> Deref for State<'_, T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        self.0
+    }
+}
+impl<T> DerefMut for State<'_, T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.0
+    }
+}
+
+pub struct StatefulExecutableKeyed<'a, Func: 'a, Args, S: Default + 'a> {
+    pub func: Func,
+    pub key: UniqKey,
+    pub _args: PhantomData<&'a Args>,
+    pub _state: PhantomData<S>,
+}
+pub struct StatefulExecutableState<'a, Func: 'a, Args, S: 'a> {
+    pub func: Func,
+    pub state: UnsafeCell<S>,
+    pub _args: PhantomData<&'a Args>,
 }
 
 // TODO: Use the below macro to implement executable for functions, like so:
@@ -223,34 +233,90 @@ where
 macro_rules! impl_executable {
     // No Arguments
     ($_unused:ident $_unused2:ident) => {
-        impl<Function, Output> IntoExecutable<()> for Function
+        impl<'a, Function, Output> IntoExecutable<'a, ((),)> for Function
         where
-            Output: 'static,
-            Function: 'static,
-            Function: Fn() -> Output,
-            Function: Clone
+            Output: 'a,
+            Function: 'a,
+            Function: Fn() -> Output + 'a,
         {
-            type Executable = FunctionStore<Self, ()>;
+            type Executable = StatelessExecutable<'a, Self, ()>;
             type Output = Output;
 
             fn into_executable(self) -> Self::Executable {
-                FunctionStore(self, PhantomData)
+                StatelessExecutable(self, PhantomData)
+            }
+        }
+        impl<'a, Function, Output, StateTy> IntoStatefulExecutable<'a, (StateTy,)> for Function
+        where
+            StateTy: 'a,
+            Output: 'a,
+            Function: 'a,
+            Function: Fn(State<'_, StateTy>) -> Output + 'a,
+        {
+            type Output = Output;
+            type State = StateTy;
+            type KeyedExecutable = StatefulExecutableKeyed<'a, Self, (), StateTy>
+            where
+                Self::State: Default;
+            type StateExecutable = StatefulExecutableState<'a, Self, (), StateTy>;
+
+            fn into_executable_with_key(self, key: UniqKey) -> Self::KeyedExecutable
+            where
+                Self::State: Default
+            {
+                StatefulExecutableKeyed {
+                    func: self,
+                    key,
+                    _args: PhantomData,
+                    _state: PhantomData
+                }
+            }
+            fn into_executable_with_state(self, state: Self::State) -> Self::StateExecutable {
+                StatefulExecutableState {
+                    func: self,
+                    state: UnsafeCell::new(state),
+                    _args: PhantomData
+                }
+            }
+            fn run_with_state(self, state: &mut Self::State, _: &World) -> Self::Output {
+                (self)(State(state))
             }
         }
 
-        impl<Function, Output> Executable for FunctionStore<Function, ()>
+        impl<'a, Function, Output> Executable<'a> for StatelessExecutable<'a, Function, ()>
         where
-            Output: 'static,
-            Function: Fn() -> Output + Clone + 'static
+            Output: 'a,
+            Function: Fn() -> Output + 'a
         {
             type Output = Output;
-            type Arguments = ();
 
-            fn execute(&self, _: &mut World) -> Self::Output {
+            fn execute(&self, _: &World) -> Self::Output {
                 self.0()
             }
-            fn execute_immut(&self, _: &World) -> (Self::Output, Box<dyn FnOnce(&mut World) + Send>) {
-                (self.0(), Box::new(|_| {}))
+        }
+        impl<'a, Function, Output, StateTy> Executable<'a> for StatefulExecutableKeyed<'a, Function, (), StateTy>
+        where
+            StateTy: Default + 'a,
+            Output: 'a,
+            Function: Fn(State<'_, StateTy>) -> Output + 'a
+        {
+            type Output = Output;
+
+            fn execute(&self, world: &World) -> Self::Output {
+                let state = world.states.get_or_default(uniq_key!((&self.key.as_modifier())));
+                (self.func)(State(state))
+            }
+        }
+        impl<'a, Function, Output, StateTy> Executable<'a> for StatefulExecutableState<'a, Function, (), StateTy>
+        where
+            StateTy: 'a,
+            Output: 'a,
+            Function: Fn(State<'_, StateTy>) -> Output + 'a
+        {
+            type Output = Output;
+
+            fn execute(&self, _: &World) -> Self::Output {
+                (self.func)(State(unsafe { &mut *self.state.get() }))
             }
         }
     };
@@ -265,19 +331,18 @@ macro_rules! impl_executable {
             Function: 'static,
             Function: Fn($($tyref::Borrowed<'_, '_>),*) -> Output,
             Function: Fn($($tyref),*) -> Output,
-            Function: Clone
         {
-            type Executable = FunctionStore<Self, ($($ty),*, $($tyref),*)>;
+            type Executable = StatelessExecutable<Self, ($($ty),*, $($tyref),*)>;
             type Output = Output;
             #[allow(unused_parens)]
             type Mutation = ($($ty::Mutation),*);
 
             fn into_executable(self) -> Self::Executable {
-                FunctionStore(self, PhantomData)
+                StatelessExecutable(self, PhantomData)
             }
         }
 
-        impl<Function, Output, $($ty),*, $($tyref),*> Executable for FunctionStore<Function, ($($ty),*, $($tyref),*)>
+        impl<Function, Output, $($ty),*, $($tyref),*> Executable for StatelessExecutable<Function, ($($ty),*, $($tyref),*)>
         where
             $(for<'a> $ty: ExecutableArg + 'a),*,
             $(for<'a> $tyref: ExecutableArgRef<EA = $ty> + 'a),*,
@@ -285,7 +350,6 @@ macro_rules! impl_executable {
             Function: 'static,
             Function: Fn($($tyref::Borrowed<'_, '_>),*) -> Output,
             Function: Fn($($tyref),*) -> Output,
-            Function: Clone
         {
             type Output = Output;
             #[allow(unused_parens)]
@@ -328,59 +392,147 @@ macro_rules! impl_executable_workaround {
 
     // Arguments
     ($_unused:ident $_unused2:ident $($ty:ident $tyref:ident)*) => {
-        impl<Function, Output, $($ty),*, $($tyref),*> IntoExecutable<($($ty),*, $($tyref),*)> for Function
+        impl<'a, Function, Output, $($ty),*, $($tyref),*> IntoExecutable<'a, ($($ty),*, $($tyref),*)> for Function
         where
-            $($ty: ExecutableArg + 'static),*,
-            $($tyref: ExecutableArgRef<EA = $ty> + 'static),*,
-            Output: 'static,
-            Function: 'static,
-            Function: for<'a> Fn($($tyref::Borrowed<'a, 'a>),*) -> Output,
+            $($ty: ExecutableArg + 'a),*,
+            $($tyref: ExecutableArgRef<EA = $ty> + 'a),*,
+            Output: 'a,
+            Function: 'a,
+            Function: for<'b> Fn($($tyref::Borrowed<'b, 'b>),*) -> Output,
             Function: Fn($($tyref),*) -> Output,
-            Function: Clone
         {
-            type Executable = FunctionStore<Self, ($($ty),*, $($tyref),*)>;
+            type Executable = StatelessExecutable<'a, Self, ($($ty),*, $($tyref),*)>;
             type Output = Output;
 
             fn into_executable(self) -> Self::Executable {
-                FunctionStore(self, PhantomData)
+                StatelessExecutable(self, PhantomData)
             }
         }
-
-        impl<Function, Output, $($ty),*, $($tyref),*> Executable for FunctionStore<Function, ($($ty),*, $($tyref),*)>
+        impl<'a, Function, Output, StateTy, $($ty),*, $($tyref),*> IntoStatefulExecutable<'a, (StateTy, $($ty),*, $($tyref),*)> for Function
         where
-            $($ty: ExecutableArg + 'static),*,
-            $($tyref: ExecutableArgRef<EA = $ty> + 'static),*,
-            Output: 'static,
-            Function: 'static,
-            Function: for<'a> Fn($($tyref::Borrowed<'a, 'a>),*) -> Output,
-            Function: Fn($($tyref),*) -> Output,
-            Function: Clone
+            $($ty: ExecutableArg + 'a),*,
+            $($tyref: ExecutableArgRef<EA = $ty> + 'a),*,
+            StateTy: 'a,
+            Output: 'a,
+            Function: 'a,
+            Function: for<'b> Fn(State<'_, StateTy>, $($tyref::Borrowed<'b, 'b>),*) -> Output,
+            Function: Fn(State<'_, StateTy>, $($tyref),*) -> Output,
         {
             type Output = Output;
-            #[allow(unused_parens)]
-            type Arguments = ($($ty),*);
+            type State = StateTy;
+            type KeyedExecutable = StatefulExecutableKeyed<'a, Self, ($($ty),*, $($tyref),*), StateTy>
+            where
+                Self::State: Default;
+            type StateExecutable = StatefulExecutableState<'a, Self, ($($ty),*, $($tyref),*), StateTy>;
 
-            #[allow(non_snake_case)]
-            fn execute(&self, world: &mut World) -> Self::Output {
-                let world_extended: &World = unsafe { &*(world as *mut World) };
-
-                $(let mut $ty = $ty::build(world_extended);)*
-                let result = self.0($($tyref::borrow(unsafe { &mut *(&mut $ty as *mut $ty::Arg<'_>) })),*);
-                $(($ty.on_drop())(world);)*
-
-                result
+            fn into_executable_with_key(self, key: UniqKey) -> Self::KeyedExecutable
+            where
+                Self::State: Default {
+                StatefulExecutableKeyed {
+                    func: self,
+                    key,
+                    _args: PhantomData,
+                    _state: PhantomData
+                }
+            }
+            fn into_executable_with_state(self, state: Self::State) -> Self::StateExecutable {
+                StatefulExecutableState {
+                    func: self,
+                    state: UnsafeCell::new(state),
+                    _args: PhantomData
+                }
             }
             #[allow(non_snake_case)]
-            fn execute_immut(&self, world: &World) -> (Self::Output, Box<dyn FnOnce(&mut World) + Send>) {
+            fn run_with_state(self, state: &mut Self::State, world: &World) -> Self::Output {
                 let world_extended: &World = unsafe { &*(world as *const World) };
 
                 $(let mut $ty = $ty::build(world_extended);)*
 
+                let result = (self)(
+                    State(state),
+                    $($tyref::borrow(unsafe { &mut *(&mut $ty as *mut $ty::Arg<'_>) })),*
+                );
+                $($ty.drop(world);)*
+
+                result
+            }
+        }
+
+        impl<'a, Function, Output, $($ty),*, $($tyref),*> Executable<'a> for StatelessExecutable<'a, Function, ($($ty),*, $($tyref),*)>
+        where
+            $($ty: ExecutableArg + 'a),*,
+            $($tyref: ExecutableArgRef<EA = $ty> + 'a),*,
+            Output: 'a,
+            Function: 'a,
+            Function: for<'b> Fn($($tyref::Borrowed<'b, 'b>),*) -> Output,
+            Function: Fn($($tyref),*) -> Output,
+        {
+            type Output = Output;
+
+            #[allow(non_snake_case)]
+            fn execute(&self, world: &World) -> Self::Output {
+                let world_extended: &World = unsafe { &*(world as *const World) };
+
+                $(let mut $ty = $ty::build(world_extended);)*
                 let result = self.0($($tyref::borrow(unsafe { &mut *(&mut $ty as *mut $ty::Arg<'_>) })),*);
+                $($ty.drop(world);)*
 
-                $(let $ty = $ty.on_drop();)*
+                result
+            }
+        }
+        impl<'a, Function, Output, StateTy, $($ty),*, $($tyref),*> Executable<'a> for StatefulExecutableKeyed<'a, Function, ($($ty),*, $($tyref),*), StateTy>
+        where
+            $($ty: ExecutableArg + 'a),*,
+            $($tyref: ExecutableArgRef<EA = $ty> + 'a),*,
+            StateTy: Default + 'a,
+            Output: 'a,
+            Function: 'a,
+            Function: for<'b> Fn(State<'_, StateTy>, $($tyref::Borrowed<'b, 'b>),*) -> Output,
+            Function: Fn(State<'_, StateTy>, $($tyref),*) -> Output,
+        {
+            type Output = Output;
 
-                (result, Box::new(move |world| { $( ($ty)(world); )* }))
+            #[allow(non_snake_case)]
+            fn execute(&self, world: &World) -> Self::Output {
+                let world_extended: &World = unsafe { &*(world as *const World) };
+
+                $(let mut $ty = $ty::build(world_extended);)*
+                let state = world.states.get_or_default(unsafe { self.key.clone() });
+
+                let result = (self.func)(
+                    State(state),
+                    $($tyref::borrow(unsafe { &mut *(&mut $ty as *mut $ty::Arg<'_>) })),*
+                );
+                $($ty.drop(world);)*
+
+                result
+            }
+        }
+        impl<'a, Function, Output, StateTy, $($ty),*, $($tyref),*> Executable<'a> for StatefulExecutableState<'a, Function, ($($ty),*, $($tyref),*), StateTy>
+        where
+            $($ty: ExecutableArg + 'a),*,
+            $($tyref: ExecutableArgRef<EA = $ty> + 'a),*,
+            StateTy: 'a,
+            Output: 'a,
+            Function: 'a,
+            Function: for<'b> Fn(State<'_, StateTy>, $($tyref::Borrowed<'b, 'b>),*) -> Output,
+            Function: Fn(State<'_, StateTy>, $($tyref),*) -> Output,
+        {
+            type Output = Output;
+
+            #[allow(non_snake_case)]
+            fn execute(&self, world: &World) -> Self::Output {
+                let world_extended: &World = unsafe { &*(world as *const World) };
+
+                $(let mut $ty = $ty::build(world_extended);)*
+
+                let result = (self.func)(
+                    State(unsafe { &mut *self.state.get() }),
+                    $($tyref::borrow(unsafe { &mut *(&mut $ty as *mut $ty::Arg<'_>) })),*
+                );
+                $($ty.drop(world);)*
+
+                result
             }
         }
 
@@ -393,7 +545,7 @@ impl_executable_workaround!(A ARef A ARef B BRef C CRef D DRef E ERef F FRef);
 mod tests {
     use {super::*, crate::prelude::*};
 
-    fn accepts_executable<Args>(func: impl IntoExecutable<Args>) {
+    fn accepts_executable<'a, Args>(func: impl IntoExecutable<'a, Args>) {
         let mut world = World::new();
         world.add_singleton(0_u32);
         world.add_singleton(1_i32);
@@ -404,13 +556,20 @@ mod tests {
     fn executable2(_num: &Singleton<i32>, _num2: &mut Singleton<u32>) {}
     fn executable3() {}
 
+    fn stateful_executable(_state: State<u32>) {}
+    fn stateful_executable2(_state: State<u32>, _num: &mut Singleton<u32>) {}
+
     #[test]
     fn type_test() {
         accepts_executable(executable);
         accepts_executable(executable2);
         accepts_executable(executable3);
+
         accepts_executable(|| {});
         accepts_executable(|_: &mut Singleton<i32>| {});
         accepts_executable(|_: &Singleton<i32>, _: &mut Singleton<i32>| {});
+
+        accepts_executable(stateful_executable.into_executable_with_key(uniq_key!()));
+        accepts_executable(stateful_executable2.into_executable_with_key(uniq_key!()));
     }
 }

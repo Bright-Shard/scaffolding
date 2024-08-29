@@ -9,26 +9,24 @@ pub mod os;
 pub mod utils;
 pub mod world;
 
+pub use ahash as _ahash;
+
 pub mod prelude {
     //! Reexported types you'll probably need to use Scaffolding.
 
     #[cfg(feature = "multi")]
     pub use crate::multi::ExecuteInParallel;
     pub use crate::{
-        datatypes::TypeMap,
-        world::{executable_args::*, ExecutableArg, World},
+        datatypes::{uniq_key, TypeMap},
+        world::{executable_args::*, ExecutableArg, Msg, State, World},
     };
 }
 pub mod plugin_prelude {
     //! Reexported types you'll probably need to make a Scaffolding plugin.
 
-    #[cfg(feature = "multi")]
-    pub use crate::multi::ExecuteInParallel;
+    pub use crate::prelude::*;
     pub use crate::{
-        datatypes::{ArenaVec, StackVec, TypeMap, Warehouse},
-        world::{
-            executable_args::*, Executable, ExecutableArg, IntoExecutable, Plugin,
-            UnsizedExecutable, World,
-        },
+        datatypes::{ArenaVec, StackVec, Uniq, Warehouse},
+        world::{Executable, IntoExecutable, Plugin, UnsizedExecutable},
     };
 }

@@ -19,9 +19,11 @@ pub trait ExecuteInParallel<Args, E, O> {
     fn execute_in_parallel(&mut self, executables: E) -> O;
 }
 
-impl<Args, E: IntoExecutable<Args>> ExecuteInParallel<Args, E, E::Output> for World {
+impl<Args, E: IntoExecutable<'static, Args>> ExecuteInParallel<Args, E, E::Output> for World {
     fn execute_in_parallel(&mut self, executables: E) -> E::Output {
-        executables.into_executable().execute(self)
+        let out = executables.into_executable().execute(self);
+        self.apply_msgs();
+        out
     }
 }
 
@@ -59,7 +61,7 @@ macro_rules! impl_execute_in_parallel {
         for World
         where
             $(
-                $generic: IntoExecutable<$args> + Send,
+                $generic: IntoExecutable<'static, $args> + Send,
                 $generic::Output: Send
             ),*
 
@@ -83,17 +85,15 @@ macro_rules! impl_execute_in_parallel {
                             let world = unsafe { &*world.take() };
                             let executable = tuple_idx!(executables, $generic);
                             let executable = executable.into_executable();
-                            let output = executable.execute_immut(world);
+                            let output = executable.execute(world);
                             output
                         })
                     };
                 )*
                 $(
-                    let ($generic, $args) = $generic.join().unwrap();
+                    let $generic = $generic.join().unwrap();
                 )*
-                $(
-                    ($args)(self);
-                )*
+                self.apply_msgs();
                 ($($generic),*)
             }
         }
@@ -124,7 +124,11 @@ mod tests {
         let mut world = World::new();
         world
             .add_singleton(thread::current().id())
-            .add_singleton(0u32);
+            .add_singleton(NumThreads(0))
+            .add_msg_handler(|world, _: Msg<MsgNewThread>| {
+                let num_threads: &mut NumThreads = world.get_singleton_mut();
+                num_threads.0 += 1;
+            });
 
         world.execute_in_parallel((
             parallel_executable,
@@ -132,41 +136,24 @@ mod tests {
             parallel_executable,
             parallel_executable,
         ));
-        let thread_count: u32 = *world.get_singleton();
-        assert_eq!(thread_count, 4);
+
+        let num_threads: &NumThreads = world.get_singleton();
+        assert_eq!(num_threads.0, 4);
     }
 
     fn parallel_executable(
         main_thread_id: &Singleton<ThreadId>,
-        thread_counter: &mut ThreadCounter,
+        num_threads: &Singleton<NumThreads>,
+        msg_sender: &MsgSender,
     ) {
         let current_thread_id = thread::current().id();
         println!("Thread {current_thread_id:?} running.");
         assert_ne!(**main_thread_id, current_thread_id);
-        assert_eq!(thread_counter.count, 0);
-        thread_counter.increment = true;
+        assert_eq!(num_threads.0, 0);
+
+        msg_sender.send(MsgNewThread);
     }
 
-    #[derive(Clone)]
-    struct ThreadCounter {
-        pub count: u32,
-        pub increment: bool,
-    }
-    impl ExecutableArg for ThreadCounter {
-        type Arg<'a> = Self;
-
-        fn build(world: &World) -> Self::Arg<'_> {
-            Self {
-                count: *world.get_singleton(),
-                increment: false,
-            }
-        }
-        fn on_drop(self) -> impl FnOnce(&mut World) + Send + 'static {
-            move |world| {
-                if self.increment {
-                    *world.get_singleton_mut::<u32>() += 1;
-                }
-            }
-        }
-    }
+    struct NumThreads(u8);
+    struct MsgNewThread;
 }

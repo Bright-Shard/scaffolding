@@ -1,7 +1,7 @@
 //! Types that can be used as arguments in [`Executable`]s.
 
 use {
-    crate::plugin_prelude::*,
+    crate::{datatypes::uniq::UniqKey, plugin_prelude::*},
     core::{
         fmt::{Debug, Formatter},
         ops::Deref,
@@ -13,7 +13,7 @@ pub trait ExecutableArg {
     type Arg<'a>: ExecutableArg;
 
     fn build(world: &World) -> Self::Arg<'_>;
-    fn on_drop(self) -> impl FnOnce(&mut World) + Send + 'static;
+    fn drop(self, world: &World);
 }
 
 // Included executable args below
@@ -30,9 +30,7 @@ impl<T: 'static> ExecutableArg for Singleton<'_, T> {
             val: world.get_singleton(),
         }
     }
-    fn on_drop(self) -> impl FnOnce(&mut World) + Send + 'static {
-        |_| {}
-    }
+    fn drop(self, _: &World) {}
 }
 impl<'a, T> Deref for Singleton<'a, T> {
     type Target = T;
@@ -47,24 +45,35 @@ impl<T: Debug> Debug for Singleton<'_, T> {
     }
 }
 
-/// Sets a callback to run after the current [`Executable`] finishes running.
-pub struct PostRunCallback<F: FnOnce(&mut World) + Send + 'static>(Option<F>);
-impl<F: FnOnce(&mut World) + Send + 'static> PostRunCallback<F> {
-    pub fn set_callback(&mut self, func: F) {
-        self.0 = Some(func);
+pub struct MsgSender<'a>(&'a World);
+impl ExecutableArg for MsgSender<'_> {
+    type Arg<'a> = MsgSender<'a>;
+
+    fn build(world: &World) -> Self::Arg<'_> {
+        MsgSender(world)
+    }
+    fn drop(self, _: &World) {}
+}
+impl MsgSender<'_> {
+    pub fn send<M: 'static>(&self, msg: M) {
+        self.0.send_msg(msg);
     }
 }
-impl<F: FnOnce(&mut World) + Send + 'static> ExecutableArg for PostRunCallback<F> {
-    type Arg<'a> = Self;
 
-    fn build(_: &World) -> Self::Arg<'_> {
-        Self(None)
+pub struct StatesStorage<'a>(&'a World);
+impl ExecutableArg for StatesStorage<'_> {
+    type Arg<'a> = StatesStorage<'a>;
+
+    fn build(world: &World) -> Self::Arg<'_> {
+        StatesStorage(world)
     }
-    fn on_drop(self) -> impl FnOnce(&mut World) + Send + 'static {
-        move |world| {
-            if let Some(cb) = self.0 {
-                cb(world)
-            }
-        }
+    fn drop(self, _: &World) {}
+}
+impl StatesStorage<'_> {
+    pub fn get<T: Default>(&self, key: UniqKey) -> &mut T {
+        self.0.states.get_or_default(key)
+    }
+    pub fn get_or_insert<T>(&self, key: UniqKey, default: impl FnOnce() -> T) -> &mut T {
+        self.0.states.get(key, default)
     }
 }
