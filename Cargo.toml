@@ -1,6 +1,6 @@
 [workspace]
 members = [
-    "examples/gui",
+    "examples/gui", "examples/shiny-tui",
     "examples/todo",
     "plugins/scaffolding-tui",
     "plugins/scaffolding-ui",

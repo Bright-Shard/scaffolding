@@ -8,8 +8,8 @@ pub mod widgets;
 
 pub mod prelude {
     pub use crate::{
-        input::Key, msg::TuiMsg, runloop::TuiRunloop, shapes::*, terminal::Terminal, App, Colour,
-        TuiPlugin,
+        input::Key, msg::TuiMsg, runloop::TuiRunloop, shapes::*, terminal::Terminal, widgets::*,
+        App, Colour, TuiPlugin,
     };
 }
 

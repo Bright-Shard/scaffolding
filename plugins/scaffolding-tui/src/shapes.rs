@@ -178,4 +178,43 @@ impl BorderStyle {
         bottom_left: '╰',
         left: '│',
     };
+    /// ┌───┐
+    /// │   │
+    /// └───┘
+    pub const NORMAL: Self = Self {
+        top_left: '┌',
+        top: '─',
+        top_right: '┐',
+        right: '│',
+        bottom_right: '┘',
+        bottom: '─',
+        bottom_left: '└',
+        left: '│',
+    };
+    /// ┏━━━┓
+    /// ┃   ┃
+    /// ┗━━━┛
+    pub const HEAVY: Self = Self {
+        top_left: '┏',
+        top: '━',
+        top_right: '┓',
+        right: '┃',
+        bottom_right: '┛',
+        bottom: '━',
+        bottom_left: '┗',
+        left: '┃',
+    };
+    /// ╔═══╗
+    /// ║   ║
+    /// ╚═══╝
+    pub const DOUBLE: Self = Self {
+        top_left: '╔',
+        top: '═',
+        top_right: '╗',
+        right: '║',
+        bottom_right: '╝',
+        bottom: '═',
+        bottom_left: '╚',
+        left: '║',
+    };
 }

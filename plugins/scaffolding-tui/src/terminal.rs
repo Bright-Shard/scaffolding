@@ -102,6 +102,9 @@ impl Terminal {
             write!(&self.output_buffer, "\x1B[{};{}H", y + 1, x + 1).unwrap();
             // Show cursor
             write!(&self.output_buffer, "\x1B[?25h").unwrap();
+        } else {
+            // Hide cursor
+            write!(&self.output_buffer, "\x1B[?25l").unwrap();
         }
         stdout().write_all(&self.output_buffer).unwrap();
         stdout().flush().unwrap();

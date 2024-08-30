@@ -1,10 +1,4 @@
-use {
-    scaffolding::prelude::*,
-    scaffolding_tui::{
-        prelude::*,
-        widgets::{text_input, SomeWidget},
-    },
-};
+use {scaffolding::prelude::*, scaffolding_tui::prelude::*};
 
 struct AppState {
     key_log: String,

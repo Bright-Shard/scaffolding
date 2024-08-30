@@ -121,6 +121,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "shiny-tui"
+version = "0.1.0"
+dependencies = [
+ "scaffolding",
+ "scaffolding-tui",
+]
+
+[[package]]
 name = "syn"
 version = "2.0.76"
 source = "registry+https://github.com/rust-lang/crates.io-index"
