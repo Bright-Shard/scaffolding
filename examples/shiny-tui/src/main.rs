@@ -40,10 +40,10 @@ fn app(app: &App, terminal: &Singleton<Terminal>, states_storage: &StatesStorage
     .enumerate()
     .for_each(|(idx, border)| {
         terminal.draw(Border {
-            x: idx as u16 * 10,
-            y: 10,
-            width: 10,
-            height: 10,
+            x: idx as u16 * 7,
+            y: 7,
+            width: 7,
+            height: 7,
             fg: Some(Colour::WHITE),
             bg: None,
             style: border,

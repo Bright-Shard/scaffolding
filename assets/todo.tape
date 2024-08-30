@@ -1,12 +1,9 @@
 # Powered by VHS:
 # https://github.com/charmbracelet/vhs
 
-Output todo.gif
+Source shared.tape
 
-Set Shell "zsh"
-Set FontSize 32
-Set Width 1200
-Set Height 1200
+Output todo.gif
 
 Type "cd ~/Dev/scaffolding/examples/todo" Enter
 Sleep 1s
