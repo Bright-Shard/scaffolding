@@ -66,9 +66,8 @@ where
 ///
 /// Executable args can only be borrowed by executables, not owned. This is
 /// needed so that the executable arg can be passed to the executable without
-/// being dropped; after it's passed to the executable, it's used to build the
-/// executable's mutation function (see [`ExecutableArg::on_drop`]), so it can't
-/// be dropped until then.
+/// being dropped, because we need to run their dedicated destructors after the
+/// executable runs (see [`ExecutableArg::drop`]).
 ///
 /// This creates a new issue, however, because now executables can take both
 /// mutable and immutable borrows, and those can be in any order - like these

@@ -31,6 +31,4 @@ impl OsTrait for Os {
     unsafe fn deallocate(ptr: NonNull<c_void>, amount: usize) {
         unix_common::deallocate(ptr, amount)
     }
-
-    fn current_thread() -> i64 {}
 }

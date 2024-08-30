@@ -187,13 +187,10 @@ struct UniqEntry {
 #[macro_export]
 macro_rules! uniq_key {
     ($($hashable:tt),*) => {{
-        let thread_id = <scaffolding::os::Os as scaffolding::os::OsTrait>::current_thread();
-
         let mut hasher = scaffolding::_ahash::AHasher::default();
         ::core::hash::Hash::hash(&column!(), &mut hasher);
         ::core::hash::Hash::hash(&line!(), &mut hasher);
         ::core::hash::Hash::hash(&file!(), &mut hasher);
-        ::core::hash::Hash::hash(&thread_id, &mut hasher);
         $(::core::hash::Hash::hash(&$hashable, &mut hasher);)*
 
         let result = ::core::hash::Hasher::finish(&hasher);

@@ -1,6 +1,6 @@
 //! OS API functions that are the same on all Unix OSes. Large parts of this
 //! code are from Speykious' csussus project:
-//! https://github.com/Speykious/csussus/blob/main/src/arena.rs
+//! <https://github.com/Speykious/csussus/blob/main/src/arena.rs>
 
 use {
     core::{

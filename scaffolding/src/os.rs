@@ -49,8 +49,6 @@ pub trait OsTrait {
     /// with [`OsTrait::allocate`]. That memory shouldn't be reserved
     /// or committed.
     unsafe fn deallocate(ptr: NonNull<c_void>, amount: usize);
-
-    fn current_thread() -> i64;
 }
 
 /// Miscellaneous OS information.

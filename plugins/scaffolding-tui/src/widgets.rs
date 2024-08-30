@@ -1,6 +1,6 @@
 use {
     crate::{
-        input::{Key, ScrollDirection},
+        input::Key,
         prelude::Terminal,
         shapes::{Border, BorderStyle, Text},
         Colour,
