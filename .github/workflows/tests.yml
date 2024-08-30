@@ -11,7 +11,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
       - name: Cargo Doc
-        run: cargo doc
+        run: cargo doc --features std
   Linux-Tests:
     runs-on: ubuntu-latest
     steps:
