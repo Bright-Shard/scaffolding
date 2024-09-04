@@ -113,15 +113,15 @@ impl World {
 
     /// Run an [`Executable`] with the data in this [`World`], then immediately
     /// apply any messages it sent.
-    pub fn execute<'a, E: IntoExecutable<'a, Args>, Args>(&mut self, executable: E) -> E::Output {
-        let out = executable.into_executable().execute(self);
-        self.apply_msgs();
+    pub fn execute<'a, Args, E: Executable<'a, Args>>(&mut self, executable: E) -> E::Output {
+        let out = executable.execute(self);
+        self.process_msgs();
         out
     }
     /// Run an [`Executable`] with the data in this [`World`], but don't
     /// apply any messages it sent.
-    pub fn execute_immut<'a, E: IntoExecutable<'a, Args>, Args>(&self, executable: E) -> E::Output {
-        executable.into_executable().execute(self)
+    pub fn execute_immut<'a, Args, E: Executable<'a, Args>>(&self, executable: E) -> E::Output {
+        executable.execute(self)
     }
 
     pub fn send_msg_now<M: 'static>(&mut self, mut msg: M) {
@@ -129,7 +129,7 @@ impl World {
             let ptr = unsafe { NonNull::new_unchecked(&mut msg as *mut M) };
             handler(self, Msg(ptr));
         }
-        self.apply_msgs();
+        self.process_msgs();
     }
     pub fn send_msg<M: 'static>(&self, msg: M) {
         // Message encoding:
@@ -161,7 +161,7 @@ impl World {
     pub fn add_msg_handler<M: 'static>(&mut self, handler: fn(&mut World, Msg<M>)) {
         self.msg_handlers.insert(handler);
     }
-    pub fn apply_msgs(&mut self) {
+    pub fn process_msgs(&mut self) {
         if self.msg_buffer.is_empty() {
             return;
         }

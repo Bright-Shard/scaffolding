@@ -60,16 +60,16 @@ impl MsgSender<'_> {
     }
 }
 
-pub struct StatesStorage<'a>(&'a World);
-impl ExecutableArg for StatesStorage<'_> {
-    type Arg<'a> = StatesStorage<'a>;
+pub struct Uniqs<'a>(&'a World);
+impl ExecutableArg for Uniqs<'_> {
+    type Arg<'a> = Uniqs<'a>;
 
     fn build(world: &World) -> Self::Arg<'_> {
-        StatesStorage(world)
+        Uniqs(world)
     }
     fn drop(self, _: &World) {}
 }
-impl StatesStorage<'_> {
+impl Uniqs<'_> {
     pub fn get<T: Default>(&self, key: UniqKey) -> &mut T {
         self.0.states.get_or_default(key)
     }

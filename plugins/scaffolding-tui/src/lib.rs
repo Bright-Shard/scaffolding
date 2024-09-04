@@ -8,12 +8,17 @@ pub mod widgets;
 
 pub mod prelude {
     pub use crate::{
-        input::Key, msg::TuiMsg, runloop::TuiRunloop, shapes::*, terminal::Terminal, widgets::*,
+        input::Key,
+        msg::TuiMsg,
+        runloop::TuiRunloop,
+        shapes::*,
+        terminal::Terminal,
+        widgets::{Button, ButtonState, Frame, HAlign, Text, TextInput, VAlign},
         App, Colour, TuiPlugin,
     };
 }
 
-use {msg::TuiMsg, scaffolding::plugin_prelude::*, terminal::Terminal, widgets::SomeWidget};
+use {msg::TuiMsg, scaffolding::plugin_prelude::*, terminal::Terminal, widgets::Widget};
 
 #[derive(Default)]
 pub struct TuiPlugin {}
@@ -35,12 +40,33 @@ impl ExecutableArg for App<'_> {
     fn drop(self, _: &World) {}
 }
 impl App<'_> {
-    pub fn draw<'a, W: SomeWidget<'a>>(&self, widget: W) -> W::Output {
-        widget.build().execute(self.0)
+    pub fn draw<'a, Args, D: Drawable<'a, Args>>(&self, drawable: D) -> D::Output {
+        drawable.build().execute(self.0)
     }
 
     pub fn exit(&self) {
         self.0.send_msg(TuiMsg::ExitRunloop);
+    }
+}
+
+/// Types that can be used with [`App::draw`]. This is implemented for
+/// [`Widget`]s and [`Executable`]s by default.
+pub trait Drawable<'a, Args> {
+    type Output: 'a;
+    fn build(self) -> impl TypeErasedExecutable<'a, Output = Self::Output>;
+}
+impl<'a, W: Widget<'a>> Drawable<'a, ()> for W {
+    type Output = W::Output;
+
+    fn build(self) -> impl TypeErasedExecutable<'a, Output = Self::Output> {
+        self.build_draw_fn()
+    }
+}
+impl<'a, Args: 'a, E: Executable<'a, Args>> Drawable<'a, Option<Args>> for E {
+    type Output = E::Output;
+
+    fn build(self) -> impl TypeErasedExecutable<'a, Output = Self::Output> {
+        self.type_erase()
     }
 }
 

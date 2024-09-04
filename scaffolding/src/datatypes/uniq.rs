@@ -154,27 +154,6 @@ impl UniqKey {
     pub fn new(key: usize) -> Self {
         Self(key)
     }
-
-    pub fn as_modifier(&self) -> UniqKeyModifier {
-        UniqKeyModifier(self.0)
-    }
-
-    pub unsafe fn clone(&self) -> Self {
-        Self(self.0)
-    }
-}
-
-#[derive(Clone, Copy, Hash)]
-pub struct UniqKeyModifier(usize);
-impl From<UniqKey> for UniqKeyModifier {
-    fn from(value: UniqKey) -> Self {
-        Self(value.0)
-    }
-}
-impl From<usize> for UniqKeyModifier {
-    fn from(value: usize) -> Self {
-        Self(value)
-    }
 }
 
 #[derive(Copy, Clone)]

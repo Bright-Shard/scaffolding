@@ -25,65 +25,48 @@ fn app_main(
     msg_sender: &MsgSender,
     app: &App,
     app_state: &Singleton<AppState>,
-    states_storage: &StatesStorage,
+    uniqs: &Uniqs,
 ) {
-    let buffer = states_storage.get(uniq_key!());
-    app.draw(text_input(buffer, uniq_key!()).x(50).width(30).height(3));
+    let buffer = uniqs.get(uniq_key!());
+    app.draw(TextInput::new(buffer, uniq_key!()).x(50).width(30));
 
     terminal.draw(Border {
         x: 0,
         y: 0,
         width: 50,
         height: 30,
-        fg: None,
-        bg: None,
         style: BorderStyle::ROUND,
     });
-    terminal.draw(Text {
+    terminal.draw(RawString {
         x: 1,
         y: 1,
-        fg: None,
-        bg: None,
-        max_width: None,
-        max_height: None,
         text: format!("Terminal size: {:?}", terminal.size),
     });
-    terminal.draw(Text {
+    terminal.draw(RawString {
         x: 1,
         y: 2,
-        fg: None,
-        bg: None,
-        max_width: None,
-        max_height: None,
         text: format!("Mouse pos: {:?}", terminal.mouse_pos),
     });
-    terminal.draw(Text {
+    terminal.draw(RawString {
         x: 1,
         y: 3,
-        fg: None,
-        bg: None,
-        max_width: None,
-        max_height: None,
         text: format!(
             "Pressed mouse buttons: {:?}",
             terminal.pressed_mouse_buttons
         ),
     });
-    terminal.draw(Text {
+    terminal.draw(RawString {
         x: 1,
         y: 4,
-        fg: None,
-        bg: None,
-        max_width: Some(40),
-        max_height: None,
         text: &app_state.key_log,
     });
+
+    terminal.set_fg(Some(Colour::BLUE));
     terminal.draw(Rect {
         x: terminal.mouse_pos.0,
         y: terminal.mouse_pos.1,
         width: 1,
         height: 1,
-        colour: Some(Colour::BLUE),
     });
 
     if terminal.pressed_keys.contains(&Key::Escape) {

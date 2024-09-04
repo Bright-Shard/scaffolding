@@ -7,25 +7,25 @@ fn main() {
     TuiRunloop::new(60).start(world, app);
 }
 
-fn app(app: &App, terminal: &Singleton<Terminal>, states_storage: &StatesStorage) {
-    let buffer = states_storage.get(uniq_key!());
+fn app(app: &App, terminal: &Singleton<Terminal>, uniqs: &Uniqs) {
+    app.draw(TextInput::new(uniqs.get(uniq_key!()), uniq_key!()));
 
-    app.draw(text_input(buffer, uniq_key!()).width(10));
-    let btn = app.draw(button("Button :D", uniq_key!()).x(11).width(15).height(3));
+    let btn = app.draw(
+        Button::new("button :D", uniq_key!())
+            .x(11)
+            .width(15)
+            .height(3),
+    );
     app.draw(
-        button("Tol Button :D", uniq_key!())
+        Button::new("Tol button :D", uniq_key!())
             .x(30)
             .width(20)
             .height(5),
     );
 
-    terminal.draw(Text {
+    terminal.draw(RawString {
         x: 0,
         y: 5,
-        max_width: None,
-        max_height: None,
-        fg: Some(Colour::WHITE),
-        bg: None,
         text: format!("Button is: {:?}", btn),
     });
 
@@ -44,8 +44,6 @@ fn app(app: &App, terminal: &Singleton<Terminal>, states_storage: &StatesStorage
             y: 7,
             width: 7,
             height: 7,
-            fg: Some(Colour::WHITE),
-            bg: None,
             style: border,
         });
     });

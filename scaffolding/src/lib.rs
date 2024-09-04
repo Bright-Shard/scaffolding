@@ -14,7 +14,10 @@ pub mod prelude {
 
     pub use crate::{
         datatypes::{uniq_key, TypeMap},
-        world::{executable_args::*, ExecutableArg, Msg, State, World},
+        world::{
+            executable_args::*, DynamicExecutable as _, Executable as _, ExecutableArg,
+            ExecutableWithState as _, Msg, TypeErasedExecutable as _, World,
+        },
     };
 }
 pub mod plugin_prelude {
@@ -23,6 +26,6 @@ pub mod plugin_prelude {
     pub use crate::prelude::*;
     pub use crate::{
         datatypes::{ArenaVec, StackVec, Uniq, Warehouse},
-        world::{Executable, IntoExecutable, Plugin, UnsizedExecutable},
+        world::{DynamicExecutable, Executable, ExecutableWithState, Plugin, TypeErasedExecutable},
     };
 }

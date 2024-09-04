@@ -43,55 +43,53 @@ pub struct Terminal {
     output_buffer: ArenaVec<u8>,
 }
 impl Terminal {
-    #[inline(always)]
-    pub fn draw<E: Shape>(&self, element: E) -> E::Output {
-        element.draw(self)
-    }
-
-    pub fn render_bytes(
-        &self,
-        bytes: &[u8],
-        position: (u16, u16),
-        fg: Option<Colour>,
-        bg: Option<Colour>,
-    ) {
+    pub fn set_fg(&self, fg: Option<Colour>) {
         let mut buffer = &self.output_buffer;
 
-        // Set fg colour
         if let Some(fg) = fg {
+            // Custom RGB colour
+            // TODO: Support older colour formats for terminals that don't
+            // support RGB
             write!(buffer, "\x1B[38;2;{};{};{}m", fg.r, fg.g, fg.b).unwrap();
         } else {
             // Default fg colour
             buffer.extend_from_slice(b"\x1B[39m");
         }
-        // Set bg colour
+    }
+    pub fn set_bg(&self, bg: Option<Colour>) {
+        let mut buffer = &self.output_buffer;
+
         if let Some(bg) = bg {
+            // Custom RGB colour
+            // TODO: Support older colour formats for terminals that don't
+            // support RGB
             write!(buffer, "\x1B[48;2;{};{};{}m", bg.r, bg.g, bg.b).unwrap();
+        } else {
+            // Default bg colour
+            buffer.extend_from_slice(b"\x1B[49m");
         }
+    }
+
+    #[inline(always)]
+    pub fn draw<E: Shape>(&self, element: E) -> E::Output {
+        element.draw(self)
+    }
+
+    pub fn render_bytes(&self, bytes: &[u8], position: (u16, u16)) {
+        let mut buffer = &self.output_buffer;
+
         // Move cursor
         write!(buffer, "\x1B[{};{}H", position.1 + 1, position.0 + 1).unwrap();
         // Print bytes
         buffer.extend_from_slice(bytes);
     }
-    pub fn render_char(
-        &self,
-        figure: char,
-        position: (u16, u16),
-        fg: Option<Colour>,
-        bg: Option<Colour>,
-    ) {
+    pub fn render_char(&self, figure: char, position: (u16, u16)) {
         let mut buf = [0; 4];
         let string = figure.encode_utf8(&mut buf);
-        self.render_bytes(string.as_bytes(), position, fg, bg)
+        self.render_bytes(string.as_bytes(), position)
     }
-    pub fn render_string(
-        &self,
-        string: &str,
-        position: (u16, u16),
-        fg: Option<Colour>,
-        bg: Option<Colour>,
-    ) {
-        self.render_bytes(string.as_bytes(), position, fg, bg)
+    pub fn render_string(&self, string: &str, position: (u16, u16)) {
+        self.render_bytes(string.as_bytes(), position)
     }
 
     pub fn update(&mut self) {
