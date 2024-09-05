@@ -1,6 +1,11 @@
 use {
     super::{HAlign, VAlign, Widget},
-    crate::{shapes::RawString, terminal::Terminal, widgets::Frame, Colour},
+    crate::{
+        shapes::{RawString, Shape},
+        terminal::Terminal,
+        widgets::Frame,
+        Colour,
+    },
     scaffolding::world::{Executable, ExecutableWithState, Singleton, TypeErasedExecutable},
 };
 
@@ -89,7 +94,7 @@ impl<'a> Text<'a> {
 
                 let y = match self.vertical_anchor {
                     VAlign::Top => self.frame.y,
-                    VAlign::Center => self.frame.y + ((self.frame.height + 1) / 2),
+                    VAlign::Center => self.frame.y + (self.frame.height / 2),
                     VAlign::Bottom => self.frame.y + (self.frame.height - 1),
                 };
 
@@ -113,16 +118,23 @@ impl<'a> Text<'a> {
 
                 let y = match self.vertical_anchor {
                     VAlign::Top => self.frame.y,
-                    VAlign::Center => self.frame.y + ((self.frame.height + 1) / 2),
+                    VAlign::Center => self.frame.y + (self.frame.height / 2),
                     VAlign::Bottom => self.frame.y + (self.frame.height - 1),
                 };
 
-                let max = (self.frame.width as usize).clamp(0, self.text.len());
-                terminal.draw(RawString {
-                    x,
-                    y,
-                    text: &self.text[0..max],
-                });
+                if self.text.len() > self.frame.width as usize {
+                    terminal.draw(RawString {
+                        x,
+                        y,
+                        text: &self.text[0..self.frame.width as usize],
+                    });
+                } else {
+                    terminal.draw(RawString {
+                        x,
+                        y,
+                        text: &self.text,
+                    });
+                }
             }
             HorizontalOverflowStyle::ClipWithChar(char) => {
                 let horizontal_diff = self.frame.width.saturating_sub(self.text.len() as u16);
@@ -138,25 +150,30 @@ impl<'a> Text<'a> {
 
                 let y = match self.vertical_anchor {
                     VAlign::Top => self.frame.y,
-                    VAlign::Center => self.frame.y + ((self.frame.height + 1) / 2),
+                    VAlign::Center => self.frame.y + (self.frame.height / 2),
                     VAlign::Bottom => self.frame.y + (self.frame.height - 1),
                 };
 
-                let max = (self.frame.width as usize)
-                    .clamp(0, self.text.len())
-                    .saturating_sub(1);
-                terminal.draw(RawString {
-                    x,
-                    y,
-                    text: &self.text[0..max],
-                });
-                terminal.render_char(
-                    char,
-                    (
-                        (self.frame.x + self.frame.width).saturating_sub(2),
-                        self.frame.y,
-                    ),
-                );
+                if self.text.len() > self.frame.width as usize {
+                    terminal.draw(RawString {
+                        x,
+                        y,
+                        text: &self.text[0..self.frame.width.saturating_sub(1) as usize],
+                    });
+                    terminal.render_char(
+                        char,
+                        (
+                            (self.frame.x + self.frame.width).saturating_sub(2),
+                            self.frame.y,
+                        ),
+                    );
+                } else {
+                    terminal.draw(RawString {
+                        x,
+                        y,
+                        text: &self.text,
+                    });
+                }
             }
             HorizontalOverflowStyle::Wrap => {
                 todo!()
@@ -169,6 +186,13 @@ impl<'a> Widget<'a> for Text<'a> {
 
     fn build_draw_fn(self) -> impl TypeErasedExecutable<'a, Output = Self::Output> {
         Self::draw.with_state(self).type_erase()
+    }
+}
+impl Shape for Text<'_> {
+    type Output = ();
+
+    fn draw(self, terminal: &Terminal) -> Self::Output {
+        self.draw(&Singleton::new(terminal))
     }
 }
 impl_frame_methods!(Text<'_>);

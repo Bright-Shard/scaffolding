@@ -18,6 +18,7 @@ impl<'a, E: TypeErasedExecutable<'a>> Widget<'a> for E {
 
 /// A rectangular area in the terminal. This is generally used for widget
 /// positioning.
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub struct Frame {
     pub x: u16,
     pub y: u16,
@@ -201,3 +202,5 @@ mod textinput;
 pub use textinput::*;
 mod text;
 pub use text::*;
+mod checkbox;
+pub use checkbox::*;

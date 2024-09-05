@@ -6,6 +6,9 @@ pub trait Shape {
     fn draw(self, terminal: &Terminal) -> Self::Output;
 }
 
+// Note: There's also the `Text` shape, defined in `widgets/text.rs`
+// It's both a Shape and a Widget
+
 pub struct RawString<S: AsRef<str>> {
     pub x: u16,
     pub y: u16,

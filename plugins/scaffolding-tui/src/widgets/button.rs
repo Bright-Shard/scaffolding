@@ -78,13 +78,14 @@ impl<'a> Button<'a> {
             });
         }
 
-        // TODO: Center text
-        terminal.set_fg(self.text_colour);
-        terminal.draw(RawString {
-            x: self.frame.x,
-            y: self.frame.y,
-            text: self.label,
-        });
+        terminal.draw(
+            Text::new(self.label)
+                // TODO: Implement wrapping text
+                .horizontal_overflow(HorizontalOverflowStyle::Clip)
+                .frame(self.frame)
+                .text_colour(self.text_colour)
+                .background_colour(self.background_colour),
+        );
 
         let hovered = self.hovered(terminal);
         let cached_state: &mut ButtonState = uniqs.get(self.key);

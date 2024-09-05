@@ -18,10 +18,11 @@ fn app(app: &App, terminal: &Singleton<Terminal>, uniqs: &Uniqs) {
     );
     app.draw(
         Button::new("Tol button :D", uniq_key!())
-            .x(30)
+            .x(27)
             .width(20)
             .height(5),
     );
+    app.draw(Checkbox::new("Checkbox", uniq_key!()).x(48).width(10).y(1));
 
     terminal.draw(RawString {
         x: 0,

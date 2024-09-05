@@ -22,6 +22,11 @@ pub trait ExecutableArg {
 pub struct Singleton<'a, T: 'static> {
     val: &'a T,
 }
+impl<'a, T: 'static> Singleton<'a, T> {
+    pub fn new(val: &'a T) -> Self {
+        Self { val }
+    }
+}
 impl<T: 'static> ExecutableArg for Singleton<'_, T> {
     type Arg<'a> = Singleton<'a, T>;
 

@@ -13,7 +13,7 @@ pub mod prelude {
         runloop::TuiRunloop,
         shapes::*,
         terminal::Terminal,
-        widgets::{Button, ButtonState, Frame, HAlign, Text, TextInput, VAlign},
+        widgets::{Button, ButtonState, Checkbox, Frame, HAlign, Text, TextInput, VAlign},
         App, Colour, TuiPlugin,
     };
 }
