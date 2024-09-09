@@ -1,87 +1,48 @@
 use {scaffolding::prelude::*, scaffolding_tui::prelude::*};
 
-struct AppState {
-    key_log: String,
-}
-
-enum AppMsg {
-    KeyPress(String),
+struct TodoItem {
+    label: String,
+    complete: bool,
 }
 
 fn main() {
     let mut world = World::new();
-    world
-        .add_plugin(TuiPlugin::default())
-        .add_singleton(AppState {
-            key_log: String::from("Key log: "),
-        })
-        .add_msg_handler(app_msg_handler);
+    world.add_plugin(TuiPlugin::default());
 
     TuiRunloop::default().start(world, app_main);
 }
 
-fn app_main(
-    terminal: &Singleton<Terminal>,
-    msg_sender: &MsgSender,
-    app: &App,
-    app_state: &Singleton<AppState>,
-    uniqs: &Uniqs,
-) {
-    let buffer = uniqs.get(uniq_key!());
-    app.draw(TextInput::new(buffer, uniq_key!()).x(50).width(30));
+fn app_main(terminal: &Singleton<Terminal>, msg_sender: &MsgSender, app: &App, uniqs: &Uniqs) {
+    let todo_list: &mut Vec<TodoItem> = uniqs.get(uniq_key!());
+    let mut y = 0;
 
-    terminal.draw(Border {
-        x: 0,
-        y: 0,
-        width: 50,
-        height: 30,
-        style: BorderStyle::ROUND,
-    });
-    terminal.draw(RawString {
-        x: 1,
-        y: 1,
-        text: format!("Terminal size: {:?}", terminal.size),
-    });
-    terminal.draw(RawString {
-        x: 1,
-        y: 2,
-        text: format!("Mouse pos: {:?}", terminal.mouse_pos),
-    });
-    terminal.draw(RawString {
-        x: 1,
-        y: 3,
-        text: format!(
-            "Pressed mouse buttons: {:?}",
-            terminal.pressed_mouse_buttons
-        ),
-    });
-    terminal.draw(RawString {
-        x: 1,
-        y: 4,
-        text: &app_state.key_log,
-    });
+    for (idx, item) in todo_list.iter_mut().enumerate() {
+        let checkbox = app.draw(Checkbox::new("", uniq_key!(idx)).width(2).y(y));
 
-    terminal.set_fg(Some(Colour::BLUE));
-    terminal.draw(Rect {
-        x: terminal.mouse_pos.0,
-        y: terminal.mouse_pos.1,
-        width: 1,
-        height: 1,
-    });
+        let input = TextInput::new(&mut item.label, uniq_key!(idx))
+            .width(terminal.size.0.saturating_sub(2))
+            .x(2)
+            .y(y)
+            .border(None);
+
+        if checkbox.checked {
+            app.draw(input.text_style(TextStyle::Strikethrough));
+        } else {
+            app.draw(input);
+        }
+
+        y += 1;
+    }
+
+    let add_btn = app.draw(Button::new("+").y(y.saturating_add(1)).width(5).height(3));
+    if add_btn.state == ButtonState::Pressed {
+        todo_list.push(TodoItem {
+            label: String::new(),
+            complete: false,
+        });
+    }
 
     if terminal.pressed_keys.contains(&Key::Escape) {
         app.exit();
-    }
-    for key in terminal.pressed_keys.iter() {
-        msg_sender.send(AppMsg::KeyPress(key.to_string()));
-    }
-}
-
-fn app_msg_handler(world: &mut World, msg: Msg<AppMsg>) {
-    match msg.read() {
-        AppMsg::KeyPress(key) => {
-            let state: &mut AppState = world.get_singleton_mut();
-            state.key_log += &key;
-        }
     }
 }

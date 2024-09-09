@@ -1,6 +1,6 @@
 use {
     super::{Frame, HAlign, HorizontalOverflowStyle, Text, Widget},
-    crate::prelude::Terminal,
+    crate::{prelude::Terminal, Colour},
     scaffolding::{
         datatypes::uniq::UniqKey,
         world::{Executable, ExecutableWithState, Singleton, TypeErasedExecutable, Uniqs},
@@ -19,6 +19,7 @@ pub struct Checkbox<'a> {
     frame: Frame,
     checked_char: char,
     unchecked_char: char,
+    text_colour: Option<Colour>,
 }
 impl<'a> Checkbox<'a> {
     pub fn new(label: &'a str, cache_key: UniqKey) -> Self {
@@ -33,6 +34,7 @@ impl<'a> Checkbox<'a> {
             },
             checked_char: '🗹',
             unchecked_char: '☐',
+            text_colour: None,
         }
     }
 
@@ -47,6 +49,11 @@ impl<'a> Checkbox<'a> {
     }
     pub fn unchecked_char(mut self, char: char) -> Self {
         self.unchecked_char = char;
+        self
+    }
+
+    pub fn text_colour(mut self, colour: Option<Colour>) -> Self {
+        self.text_colour = colour;
         self
     }
 
@@ -69,6 +76,7 @@ impl<'a> Checkbox<'a> {
             } else {
                 self.unchecked_char
             };
+            terminal.set_fg(self.text_colour);
             terminal.render_char(char, (self.frame.x, self.frame.y));
 
             if self.frame.width > 2 {

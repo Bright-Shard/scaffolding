@@ -142,7 +142,7 @@ macro_rules! impl_frame_methods {
         #[allow(unused_parens)]
         impl $ty {
             pub fn clicked(&self, terminal: &Terminal) -> bool {
-                terminal.pressed_mouse_buttons.contains(&0) && self.frame.contains(terminal.mouse_pos)
+                terminal.clicked_mouse_buttons.contains(&0) && self.frame.contains(terminal.mouse_pos)
             }
         }
     };

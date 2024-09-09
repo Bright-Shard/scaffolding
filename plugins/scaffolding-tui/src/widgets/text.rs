@@ -6,7 +6,10 @@ use {
         widgets::Frame,
         Colour,
     },
-    scaffolding::world::{Executable, ExecutableWithState, Singleton, TypeErasedExecutable},
+    scaffolding::{
+        bitflags,
+        world::{Executable, ExecutableWithState, Singleton, TypeErasedExecutable},
+    },
 };
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -32,6 +35,20 @@ pub enum VerticalOverflowStyle {
     Overflow,
 }
 
+bitflags! {
+    struct TextStyleFlags: u8;
+    bitflags TextStyle {
+        Bold = 0b0000_0001,
+        Dim = 0b0000_0010,
+        Italic = 0b0000_0100,
+        Underline = 0b0000_1000,
+        Blinking = 0b0001_0000,
+        Inverse = 0b0010_0000,
+        Hidden = 0b0100_0000,
+        Strikethrough = 0b1000_0000
+    }
+}
+
 pub struct Text<'a> {
     text: &'a str,
     frame: Frame,
@@ -41,6 +58,7 @@ pub struct Text<'a> {
     vertical_overflow: VerticalOverflowStyle,
     horizontal_anchor: HAlign,
     horizontal_overflow: HorizontalOverflowStyle,
+    style: TextStyleFlags,
 }
 impl<'a> Text<'a> {
     pub fn new(text: &'a str) -> Self {
@@ -58,6 +76,7 @@ impl<'a> Text<'a> {
             vertical_overflow: VerticalOverflowStyle::Clip,
             horizontal_anchor: HAlign::Center,
             horizontal_overflow: HorizontalOverflowStyle::Wrap,
+            style: TextStyleFlags::default(),
         }
     }
 
@@ -77,8 +96,37 @@ impl<'a> Text<'a> {
         self.horizontal_overflow = overflow;
         self
     }
+    pub fn text_style(mut self, style: impl Into<TextStyleFlags>) -> Self {
+        self.style.merge(style.into());
+        self
+    }
 
     fn draw(self, terminal: &Singleton<Terminal>) {
+        if self.style & TextStyle::Bold {
+            terminal.render_string_unpositioned("\x1B[1m");
+        }
+        if self.style & TextStyle::Dim {
+            terminal.render_string_unpositioned("\x1B[2m");
+        }
+        if self.style & TextStyle::Italic {
+            terminal.render_string_unpositioned("\x1B[3m");
+        }
+        if self.style & TextStyle::Underline {
+            terminal.render_string_unpositioned("\x1B[4m");
+        }
+        if self.style & TextStyle::Blinking {
+            terminal.render_string_unpositioned("\x1B[5m");
+        }
+        if self.style & TextStyle::Inverse {
+            terminal.render_string_unpositioned("\x1B[7m");
+        }
+        if self.style & TextStyle::Hidden {
+            terminal.render_string_unpositioned("\x1B[8m");
+        }
+        if self.style & TextStyle::Strikethrough {
+            terminal.render_string_unpositioned("\x1B[9m");
+        }
+
         match self.horizontal_overflow {
             HorizontalOverflowStyle::Overflow => {
                 let horizontal_diff = self.frame.width.saturating_sub(self.text.len() as u16);
@@ -178,6 +226,11 @@ impl<'a> Text<'a> {
             HorizontalOverflowStyle::Wrap => {
                 todo!()
             }
+        }
+
+        if self.style != TextStyleFlags::default() {
+            // Reset custom styles & colours
+            terminal.render_string_unpositioned("\x1B[0m");
         }
     }
 }

@@ -25,8 +25,27 @@ pub struct Terminal {
     pub size: (u16, u16),
     /// The current location of the mouse.
     pub mouse_pos: (u16, u16),
-    /// Currently pressed mouse keys.
-    pub pressed_mouse_buttons: HashSet<u8>,
+    /// Mouse buttons that have just been clicked.
+    ///
+    /// Mouse buttons are stored as a u8, but only buttons 0-11 are actually
+    /// supported (other buttons aren't always communicated by the terminal).
+    /// Mouse buttons are indexed starting at 0 (IE, mouse button 0 is left
+    /// click).
+    pub clicked_mouse_buttons: HashSet<u8>,
+    /// Mouse buttons that are currently being held.
+    ///
+    /// Mouse buttons are stored as a u8, but only buttons 0-11 are actually
+    /// supported (other buttons aren't always communicated by the terminal).
+    /// Mouse buttons are indexed starting at 0 (IE, mouse button 0 is left
+    /// click).
+    pub held_mouse_buttons: HashSet<u8>,
+    /// Mouse buttons that have just been released.
+    ///
+    /// Mouse buttons are stored as a u8, but only buttons 0-11 are actually
+    /// supported (other buttons aren't always communicated by the terminal).
+    /// Mouse buttons are indexed starting at 0 (IE, mouse button 0 is left
+    /// click).
+    pub released_mouse_buttons: HashSet<u8>,
     /// Scroll direction.
     pub scroll_direction: Option<ScrollDirection>,
     /// Any actively held modifier keys.
@@ -91,6 +110,9 @@ impl Terminal {
     pub fn render_string(&self, string: &str, position: (u16, u16)) {
         self.render_bytes(string.as_bytes(), position)
     }
+    pub fn render_string_unpositioned(&self, string: &str) {
+        self.output_buffer.extend_from_slice(string.as_bytes());
+    }
 
     pub fn update(&mut self) {
         print!("\x1B[0m\x1B[2J\x1B[H");
@@ -135,6 +157,12 @@ impl Terminal {
                 self.input_buffer.push(0);
             }
         }
+
+        // Progress mouse button states
+        for btn in self.clicked_mouse_buttons.drain() {
+            self.held_mouse_buttons.insert(btn);
+        }
+        self.released_mouse_buttons.clear();
 
         self.input_buffer.truncate(bytes_read);
         let mut stdin = self.input_buffer.iter().copied().enumerate().peekable();
@@ -218,10 +246,15 @@ impl Terminal {
                                 } else {
                                     // -1 cause it starts indexing pixels at 1
                                     self.mouse_pos = (x - 1, y - 1);
+                                    let btn = button_number as u8;
                                     if clicked {
-                                        self.pressed_mouse_buttons.insert(button_number as u8);
+                                        if !self.held_mouse_buttons.contains(&btn) {
+                                            self.clicked_mouse_buttons.insert(btn);
+                                        }
                                     } else {
-                                        self.pressed_mouse_buttons.remove(&(button_number as u8));
+                                        self.clicked_mouse_buttons.remove(&btn);
+                                        self.held_mouse_buttons.remove(&btn);
+                                        self.released_mouse_buttons.insert(btn);
                                     }
                                 }
                             }
@@ -398,7 +431,9 @@ impl Default for Terminal {
             mouse_pos: (0, 0),
             modifier_keys: ModifierKeys::default(),
             scroll_direction: None,
-            pressed_mouse_buttons: HashSet::default(),
+            clicked_mouse_buttons: HashSet::default(),
+            held_mouse_buttons: HashSet::default(),
+            released_mouse_buttons: HashSet::default(),
             pressed_keys: HashSet::default(),
             exit: false,
             target_cursor_location: Cell::new(None),

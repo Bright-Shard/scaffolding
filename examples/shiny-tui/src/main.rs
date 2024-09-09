@@ -1,4 +1,7 @@
-use {scaffolding::prelude::*, scaffolding_tui::prelude::*};
+use {
+    scaffolding::prelude::*,
+    scaffolding_tui::{prelude::*, widgets::HorizontalOverflowStyle},
+};
 
 fn main() {
     let mut world = World::new();
@@ -8,20 +11,10 @@ fn main() {
 }
 
 fn app(app: &App, terminal: &Singleton<Terminal>, uniqs: &Uniqs) {
-    app.draw(TextInput::new(uniqs.get(uniq_key!()), uniq_key!()));
+    app.draw(TextInput::new(uniqs.get(uniq_key!()), uniq_key!()).placeholder("Text box"));
 
-    let btn = app.draw(
-        Button::new("button :D", uniq_key!())
-            .x(11)
-            .width(15)
-            .height(3),
-    );
-    app.draw(
-        Button::new("Tol button :D", uniq_key!())
-            .x(27)
-            .width(20)
-            .height(5),
-    );
+    let btn = app.draw(Button::new("button :D").x(11).width(15).height(3));
+    app.draw(Button::new("Tol button :D").x(27).width(20).height(5));
     app.draw(Checkbox::new("Checkbox", uniq_key!()).x(48).width(10).y(1));
 
     terminal.draw(RawString {
@@ -29,6 +22,14 @@ fn app(app: &App, terminal: &Singleton<Terminal>, uniqs: &Uniqs) {
         y: 5,
         text: format!("Button is: {:?}", btn),
     });
+    app.draw(
+        Text::new("FANCY TEXT :DDDD")
+            .x(0)
+            .y(6)
+            .height(1)
+            .horizontal_overflow(HorizontalOverflowStyle::Clip)
+            .text_style(TextStyle::Blinking | TextStyle::Underline),
+    );
 
     [
         BorderStyle::ASCII,

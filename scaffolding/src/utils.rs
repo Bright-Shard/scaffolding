@@ -220,3 +220,171 @@ impl<T> AssumeSyncSend<T> {
 }
 unsafe impl<T> Sync for AssumeSyncSend<T> {}
 unsafe impl<T> Send for AssumeSyncSend<T> {}
+
+/// Create a struct that stores bitflags. Inspired by the bitflags crate but
+/// done my way. Example usage:
+///
+/// ```rs
+/// bitflags! {
+///     // The struct type that stores the flags, and how big it is.
+///     struct Flags: u8;
+///     // The enum containing the flags that will be stored in [`Flags`].
+///     bitflags FlagTypes {
+///         // One of the bitflags, and the bit it occupies
+///         Flag1 = 0b0000_0001;
+///         Flag2 = 0b0000_0010;
+///     }
+/// }
+///
+/// fn some_fn() {
+///     // Can create the flag storage type by or-ing flags together
+///     let mut flags = FlagTypes::Flag1 | FlagTypes::Flag2;
+///
+///     // Can add flags to a flag storage type with |=, +=, or add_flag
+///     // (these three lines all do the same thing)
+///     flags |= FlagTypes::Flag3;
+///     flags += FlagTypes::Flag3;
+///     flags.add_flag(FlagTypes::Flag3);
+///
+///     // Can remove flags from a flag storage type with ^=, -=, or remove_flag
+///     flags ^= FlagTypes::Flag3;
+///     flags -= FlagType::Flag3;
+///     flags.remove_flag(FlagType::Flag3);
+///
+///     // Can check for flags with & or contains
+///     assert!(flags & FlagType::Flag2);
+///     assert!(flags & FlagType::Flag2);
+/// }
+/// ```
+#[macro_export]
+macro_rules! bitflags {
+    (struct $struct:ident : $repr:ty; bitflags $bitflags:ident {$($variant:ident = $val:literal$(,)?)*}) => {
+        #[repr(transparent)]
+        #[derive(Clone, Copy, PartialEq, Eq, Hash)]
+        pub struct $struct($repr);
+        #[allow(dead_code)]
+        impl $struct {
+            pub fn contains(&self, flag: $bitflags) -> bool {
+                (self.0 & flag as $repr) != 0
+            }
+            pub fn add_flag(&mut self, flag: $bitflags) {
+                self.0 |= flag as $repr;
+            }
+            pub fn remove_flag(&mut self, flag: $bitflags) {
+                self.0 &= !(flag as $repr);
+            }
+            pub fn merge(&mut self, other: Self) {
+                self.0 |= other.0;
+            }
+        }
+        impl Default for $struct {
+            fn default() -> Self {
+                Self(0)
+            }
+        }
+        impl From<$bitflags> for $struct {
+            fn from(val: $bitflags) -> Self {
+                Self(val as $repr)
+            }
+        }
+        impl ::core::ops::BitOrAssign<$bitflags> for $struct {
+            fn bitor_assign(&mut self, rhs: $bitflags) {
+                self.add_flag(rhs);
+            }
+        }
+        impl ::core::ops::AddAssign<$bitflags> for $struct {
+            fn add_assign(&mut self, rhs: $bitflags) {
+                self.add_flag(rhs);
+            }
+        }
+        impl ::core::ops::BitXorAssign<$bitflags> for $struct {
+            fn bitxor_assign(&mut self, rhs: $bitflags) {
+                self.remove_flag(rhs);
+            }
+        }
+        impl ::core::ops::SubAssign<$bitflags> for $struct {
+            fn sub_assign(&mut self, rhs: $bitflags) {
+                self.remove_flag(rhs);
+            }
+        }
+        impl ::core::ops::BitAnd<$bitflags> for $struct {
+            type Output = bool;
+
+            fn bitand(self, rhs: $bitflags) -> Self::Output {
+                self.contains(rhs)
+            }
+        }
+        impl ::core::ops::BitOr<$bitflags> for $struct {
+            type Output = Self;
+
+            fn bitor(self, rhs: $bitflags) -> Self::Output {
+                Self(self.0 | rhs as $repr)
+            }
+        }
+        impl ::core::ops::BitOr<$struct> for $struct {
+            type Output = Self;
+
+            fn bitor(self, rhs: $struct) -> Self::Output {
+                Self(self.0 | rhs.0)
+            }
+        }
+
+        #[repr($repr)]
+        #[derive(Clone, Copy, PartialEq, Eq, Hash)]
+        pub enum $bitflags {
+            $($variant = $val),*
+        }
+        impl ::core::ops::BitOr<$bitflags> for $bitflags {
+            type Output = $struct;
+
+            fn bitor(self, rhs: $bitflags) -> $struct {
+                $struct(self as $repr | rhs as $repr)
+            }
+        }
+    };
+}
+pub use crate::bitflags;
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn bitflags() {
+        bitflags! {
+            struct FlagStore: u8;
+            bitflags Flags {
+                Flag1 = 0b0000_0001,
+                Flag2 = 0b0000_0010,
+            }
+        };
+
+        let mut flags = Flags::Flag1 | Flags::Flag2;
+        assert!(flags.contains(Flags::Flag1));
+        assert!(flags.contains(Flags::Flag2));
+        assert!(flags & Flags::Flag1);
+        assert!(flags & Flags::Flag2);
+
+        flags ^= Flags::Flag1;
+        assert!(!flags.contains(Flags::Flag1));
+        assert!(flags.contains(Flags::Flag2));
+        assert!(!(flags & Flags::Flag1));
+        assert!(flags & Flags::Flag2);
+
+        flags |= Flags::Flag1;
+        assert!(flags.contains(Flags::Flag1));
+        assert!(flags.contains(Flags::Flag2));
+        assert!(flags & Flags::Flag1);
+        assert!(flags & Flags::Flag2);
+
+        flags.remove_flag(Flags::Flag1);
+        assert!(!flags.contains(Flags::Flag1));
+        assert!(flags.contains(Flags::Flag2));
+        assert!(!(flags & Flags::Flag1));
+        assert!(flags & Flags::Flag2);
+
+        flags.add_flag(Flags::Flag1);
+        assert!(flags.contains(Flags::Flag1));
+        assert!(flags.contains(Flags::Flag2));
+        assert!(flags & Flags::Flag1);
+        assert!(flags & Flags::Flag2);
+    }
+}

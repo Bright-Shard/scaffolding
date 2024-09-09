@@ -1,7 +1,6 @@
 use {
     super::*,
     crate::{prelude::Terminal, shapes::*, Colour},
-    scaffolding::datatypes::uniq::UniqKey,
 };
 
 #[derive(Debug)]
@@ -19,6 +18,8 @@ pub enum ButtonState {
     Held,
     /// The mouse just released the button.
     Released,
+    /// The mouse is hovering over the button, but hasn't interacted with it.
+    Hovered,
     /// The mouse isn't interacting with the button.
     Inactive,
 }
@@ -35,10 +36,9 @@ pub struct Button<'a> {
     border_colour: Option<Colour>,
     text_colour: Option<Colour>,
     frame: Frame,
-    key: UniqKey,
 }
 impl<'a> Button<'a> {
-    pub fn new(label: &'a str, key: UniqKey) -> Self {
+    pub fn new(label: &'a str) -> Self {
         Self {
             label,
             border_style: Some(BorderStyle::ROUND),
@@ -51,7 +51,6 @@ impl<'a> Button<'a> {
                 width: 8,
                 height: 3,
             },
-            key,
         }
     }
 
@@ -64,7 +63,7 @@ impl<'a> Button<'a> {
         self
     }
 
-    fn draw(mut self, terminal: &Singleton<Terminal>, uniqs: &Uniqs) -> ButtonOut {
+    fn draw(mut self, terminal: &Singleton<Terminal>) -> ButtonOut {
         terminal.set_bg(self.background_colour);
 
         if let Some(style) = self.border_style.take() {
@@ -88,33 +87,20 @@ impl<'a> Button<'a> {
         );
 
         let hovered = self.hovered(terminal);
-        let cached_state: &mut ButtonState = uniqs.get(self.key);
 
-        if hovered {
-            if terminal.pressed_mouse_buttons.contains(&0) {
-                match *cached_state {
-                    ButtonState::Pressed => {
-                        *cached_state = ButtonState::Held;
-                    }
-                    ButtonState::Inactive | ButtonState::Released => {
-                        *cached_state = ButtonState::Pressed;
-                    }
-                    ButtonState::Held => {}
-                }
+        let state = if hovered {
+            if terminal.clicked_mouse_buttons.contains(&0) {
+                ButtonState::Pressed
+            } else if terminal.held_mouse_buttons.contains(&0) {
+                ButtonState::Held
+            } else if terminal.released_mouse_buttons.contains(&0) {
+                ButtonState::Released
             } else {
-                match *cached_state {
-                    ButtonState::Pressed | ButtonState::Held => {
-                        *cached_state = ButtonState::Released;
-                    }
-                    ButtonState::Released => {
-                        *cached_state = ButtonState::Inactive;
-                    }
-                    ButtonState::Inactive => {}
-                }
+                ButtonState::Hovered
             }
-        }
-
-        let state = *cached_state;
+        } else {
+            ButtonState::Inactive
+        };
 
         ButtonOut { state, hovered }
     }

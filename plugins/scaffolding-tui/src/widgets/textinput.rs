@@ -1,4 +1,5 @@
 use {
+    super::{HAlign, HorizontalOverflowStyle, Text, TextStyle, TextStyleFlags, VAlign},
     crate::{
         input::Key,
         prelude::Terminal,
@@ -27,19 +28,28 @@ struct TextInputCache {
     render_offset: usize,
 }
 
+pub struct TextInputOut {
+    pub focused: bool,
+}
+
 pub struct TextInput<'a> {
     buffer: &'a mut String,
+    placeholder: Option<&'a str>,
+    placeholder_colour: Option<Colour>,
     frame: Frame,
     cache_key: Option<UniqKey>,
     border_style: Option<BorderStyle>,
     border_colour: Option<Colour>,
     text_colour: Option<Colour>,
     background_colour: Option<Colour>,
+    text_style: TextStyleFlags,
 }
 impl<'a> TextInput<'a> {
     pub fn new(buffer: &'a mut String, cache_key: UniqKey) -> Self {
         Self {
             buffer,
+            placeholder: None,
+            placeholder_colour: Some(Colour::GREY),
             frame: Frame {
                 x: 0,
                 y: 0,
@@ -51,6 +61,7 @@ impl<'a> TextInput<'a> {
             border_colour: None,
             text_colour: None,
             background_colour: None,
+            text_style: TextStyleFlags::default(),
         }
     }
 
@@ -58,18 +69,26 @@ impl<'a> TextInput<'a> {
         self.border_style = style;
         self
     }
+    pub fn placeholder(mut self, placeholder: &'a str) -> Self {
+        self.placeholder = Some(placeholder);
+        self
+    }
+    pub fn text_style(mut self, style: impl Into<TextStyleFlags>) -> Self {
+        self.text_style.merge(style.into());
+        self
+    }
 
-    fn draw(mut self, uniqs: &Uniqs, terminal: &Singleton<Terminal>) {
+    fn draw(mut self, uniqs: &Uniqs, terminal: &Singleton<Terminal>) -> TextInputOut {
         let cache: &mut TextInputCache = uniqs.get(self.cache_key.take().unwrap());
-
-        // On a mouse press, if the press was inside the text input, focus it
-        // Otherwise, unfocus it
-        if terminal.pressed_mouse_buttons.contains(&0) {
-            cache.focused = self.frame.contains(terminal.mouse_pos);
-        }
 
         let text_offset = if self.border_style.is_some() { 1 } else { 0 };
         self.frame.height = if self.border_style.is_some() { 3 } else { 1 };
+
+        // On a mouse press, if the press was inside the text input, focus it
+        // Otherwise, unfocus it
+        if terminal.clicked_mouse_buttons.contains(&0) {
+            cache.focused = self.frame.contains(terminal.mouse_pos);
+        }
 
         if cache.focused {
             for key in terminal.pressed_keys.iter() {
@@ -85,7 +104,15 @@ impl<'a> TextInput<'a> {
 
         terminal.set_bg(self.background_colour);
 
-        let mut string_graphemes = self.buffer.grapheme_indices(true);
+        let string = if !self.buffer.is_empty() {
+            terminal.set_fg(self.text_colour);
+            self.buffer as &'a str
+        } else {
+            terminal.set_fg(self.placeholder_colour);
+            self.placeholder.unwrap_or_default()
+        };
+
+        let mut string_graphemes = string.grapheme_indices(true);
         let string_render_start_idx = string_graphemes
             .nth(cache.render_offset)
             .map(|(idx, _val)| idx)
@@ -93,14 +120,18 @@ impl<'a> TextInput<'a> {
         let string_render_end_idx = string_graphemes
             .nth(self.max_renderable_graphemes() as usize)
             .map(|(idx, _val)| idx)
-            .unwrap_or(self.buffer.len());
+            .unwrap_or(string.len());
 
-        terminal.set_fg(self.text_colour);
-        terminal.draw(RawString {
-            x: self.frame.x + text_offset,
-            y: self.frame.y + text_offset,
-            text: &self.buffer[string_render_start_idx..string_render_end_idx],
-        });
+        terminal.draw(
+            Text::new(&string[string_render_start_idx..string_render_end_idx])
+                .frame(self.frame)
+                .x(self.frame.x + text_offset)
+                .y(self.frame.y + text_offset)
+                .horizontal_overflow(HorizontalOverflowStyle::Clip)
+                .vertical_anchor(VAlign::Center)
+                .horizontal_anchor(HAlign::Left)
+                .text_style(self.text_style),
+        );
 
         if let Some(style) = self.border_style {
             terminal.set_fg(self.border_colour);
@@ -111,6 +142,10 @@ impl<'a> TextInput<'a> {
                 height: self.frame.height,
                 style,
             });
+        }
+
+        TextInputOut {
+            focused: cache.focused,
         }
     }
 
@@ -195,7 +230,7 @@ impl<'a> TextInput<'a> {
     }
 }
 impl<'a> Widget<'a> for TextInput<'a> {
-    type Output = ();
+    type Output = TextInputOut;
 
     fn build_draw_fn(self) -> impl TypeErasedExecutable<'a, Output = Self::Output> {
         Self::draw.with_state(self).type_erase()
