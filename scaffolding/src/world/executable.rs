@@ -202,7 +202,7 @@ impl<Args, State: 'static, E: ExecutableWithState<'static, State, Args>> Dynamic
 /// flipped. The issue is that they now have two different types - the first is
 /// a `Fn(&ExecutableArg, &mut ExectableArg)`, but the second is a
 /// `Fn(&mut ExecutableArg, &ExectableArg)`. We have to cover both cases when
-/// implementing [`IntoExecutable`] for functions - and this problem only gets
+/// implementing [`Executable`] for functions - and this problem only gets
 /// worse as we add more arguments to functions. Here's the types for
 /// executables with just two arguments:
 ///
