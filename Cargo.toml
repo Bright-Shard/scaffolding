@@ -1,6 +1,7 @@
 [workspace]
 members = [
-    "examples/gui", "examples/shiny-tui",
+    "examples/gui",
+    "examples/shiny-tui",
     "examples/todo",
     "plugins/scaffolding-tui",
     "plugins/scaffolding-ui",
@@ -10,5 +11,5 @@ exclude = ["benchmarks"]
 resolver = "2"
 
 [workspace.dependencies]
-scaffolding = { path = "scaffolding", default-features = false, features = [] }
+scaffolding = { path = "scaffolding" }
 scaffolding-tui = { path = "plugins/scaffolding-tui" }

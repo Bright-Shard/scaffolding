@@ -6,6 +6,49 @@ use {
     },
 };
 
+/// A data structure for caching data and accessing that cache later.
+///
+/// A data structure for caching data with a [`UniqKey`]. This type has interior
+/// mutability, so multiple cache entries from different [`UniqKey`]s can be
+/// accessed at the same time.
+///
+///
+/// # Examples
+///
+/// Functions can persist data across multiple function calls:
+///
+/// ```rs
+/// use scaffolding::datatypes::{Uniq, uniq_key};
+///
+/// fn add_one(uniq: &Uniq) -> usize {
+///     let cache: &mut usize = uniq.get_or_default(uniq_key!());
+///     *cache += 1;
+///
+///     *cache
+/// }
+///
+/// fn main() {
+///     let uniq = Uniq::default();
+///
+///     assert_eq!(add_one(&uniq), 1);
+///     assert_eq!(add_one(&uniq), 2);
+///     assert_eq!(add_one(&uniq), 3);
+/// }
+/// ```
+///
+///
+/// # Safety
+///
+/// This type works because [`UniqKey`]s are unique, opaque, and non-clone/copy.
+/// It's therefore not possible to access the same entry from two different
+/// places in code.
+///
+/// The only ways to break this guarantee are in unsafe Rust, by:
+/// - Unsafely creating your own [`UniqKey`] that isn't unique or can be cloned
+/// - Unsafely transmuting a [`UniqKey`]
+/// - Using raw pointers to unsafely clone a [`UniqKey`]
+///
+/// See the [`uniq_key`] macro for an explanation on why it's safe.
 pub struct Uniq {
     data: ArenaVec<u8>,
     entries: UnsafeCell<ArenaVec<Option<UniqEntry>>>,
@@ -17,6 +60,7 @@ impl Default for Uniq {
     }
 }
 impl Uniq {
+    /// Create a [`Uniq`] that can store `cap` values.
     pub fn with_capacity(cap: usize) -> Self {
         let entries = ArenaVec::with_capacity(mem::size_of::<Option<UniqEntry>>() * cap);
         (0..cap).for_each(|_| {
@@ -30,8 +74,8 @@ impl Uniq {
         }
     }
 
-    /// # Safety
-    /// `key` must be unique.
+    /// Get a cached value with a [`UniqKey`], or supply a default value if
+    /// there isn't one cached.
     #[allow(clippy::mut_from_ref)]
     pub fn get<T>(&self, key: UniqKey, default: impl FnOnce() -> T) -> &mut T {
         let entries = unsafe { &mut *self.entries.get() };
@@ -58,8 +102,8 @@ impl Uniq {
             }
         }
     }
-    /// # Safety
-    /// `key` must be unique.
+    /// Get a cached value for a [`UniqKey`], or provide [`Default::default`]
+    /// if there's no cached value.
     #[allow(clippy::mut_from_ref)]
     pub fn get_or_default<T: Default>(&self, key: UniqKey) -> &mut T {
         self.get(key, Default::default)
@@ -136,24 +180,32 @@ impl Uniq {
             .0
     }
 }
+unsafe impl Send for Uniq {}
+
+/// A key for accessing a cached value from a [`Uniq`]. You can make a
+/// [`UniqKey`] with the [`uniq_key`] macro.
+///
+/// [`UniqKey`]s **must** be unique, as that's the only reason [`Uniq`]s work.
+/// To help accomplish this, [`UniqKey`] is an opaque, non-clone, non-copy
+/// type.
+#[repr(transparent)]
+#[derive(PartialEq, Eq, Hash, Debug)]
+pub struct UniqKey(usize);
+impl UniqKey {
+    /// Create a new [`UniqKey`]. It's recommended that you use the [`uniq_key`]
+    /// macro to create a [`UniqKey`], instead of calling this function.
+    ///
+    /// # Safety
+    /// `key` must be unique.
+    pub unsafe fn new(key: usize) -> Self {
+        Self(key)
+    }
+}
 
 enum UniqIndex {
     Exact(usize),
     Collision(usize),
     None(usize),
-}
-
-#[repr(transparent)]
-pub struct UniqKey(usize);
-impl From<usize> for UniqKey {
-    fn from(value: usize) -> Self {
-        Self(value)
-    }
-}
-impl UniqKey {
-    pub fn new(key: usize) -> Self {
-        Self(key)
-    }
 }
 
 #[derive(Copy, Clone)]
@@ -163,17 +215,103 @@ struct UniqEntry {
     collision_slot: Option<usize>,
 }
 
+/// Generates a [`UniqKey`] based on the column, line, and file where the macro
+/// was invoked.
+///
+/// Because of how the macro generates a key, `uniq_key!() != uniq_key!()`. The
+/// first invocation of the macro will always be on a different line, column, or
+/// file than the second invocation.
+///
+/// That being said, the macro is not flawless. This, for example, can lead to
+/// unsafe behaviour:
+/// ```rs
+/// fn break_it() -> UniqKey {
+///     uniq_key!()
+/// }
+/// ```
+/// ...because it's possible to obtain the same key twice like this:
+/// ```rs
+/// let key1 = break_it();
+/// let key2 = break_it();
+/// ```
+///
+/// If you use this macro, *only* use it when creating variables, and don't
+/// return it from a function.
 #[macro_export]
 macro_rules! uniq_key {
     ($($hashable:tt),*) => {{
-        let mut hasher = scaffolding::_ahash::AHasher::default();
+        let mut hasher = scaffolding::_hash::Hasher::default();
         ::core::hash::Hash::hash(&column!(), &mut hasher);
         ::core::hash::Hash::hash(&line!(), &mut hasher);
         ::core::hash::Hash::hash(&file!(), &mut hasher);
         $(::core::hash::Hash::hash(&$hashable, &mut hasher);)*
 
         let result = ::core::hash::Hasher::finish(&hasher);
-        scaffolding::datatypes::uniq::UniqKey::new((result % usize::MAX as u64) as usize)
+
+        unsafe {
+            scaffolding::datatypes::uniq::UniqKey::new(
+                (result % usize::MAX as u64) as usize
+            )
+        }
     }};
 }
 pub use crate::uniq_key;
+
+#[cfg(test)]
+mod tests {
+    use {
+        super::Uniq,
+        crate::{self as scaffolding, datatypes::uniq::UniqKey},
+        core::hash::Hash,
+    };
+
+    #[allow(dead_code)]
+    fn is_sync<T: Sync>(_t: T) {}
+    #[allow(dead_code)]
+    fn is_send<T: Send>(_t: T) {}
+
+    /// Adds 1 to a cached value in the given `Uniq`, then asserts the number is
+    /// the same as the expected one.
+    fn add_one_and_check(uniq: &mut Uniq, expected: usize) {
+        let val: &mut usize = uniq.get_or_default(uniq_key!());
+        *val += 1;
+
+        assert_eq!(*val, expected);
+    }
+
+    #[test]
+    fn types_test() {
+        // Uniq should be Send but not Sync
+        is_send(Uniq::default());
+        // is_sync(Uniq::default());
+    }
+
+    #[test]
+    fn test_in_loop() {
+        let mut uniq = Uniq::default();
+
+        for i in 1..10 {
+            add_one_and_check(&mut uniq, i);
+        }
+        for i in (10..20).step_by(2) {
+            add_one_and_check(&mut uniq, i);
+            add_one_and_check(&mut uniq, i + 1);
+        }
+    }
+
+    #[test]
+    fn macro_tests() {
+        assert_ne!(uniq_key!(), uniq_key!());
+
+        fn with_hash<H: Hash>(h: H) -> UniqKey {
+            uniq_key!(h)
+        }
+        assert_ne!(with_hash("h"), with_hash(1));
+
+        // TODO: Try to find some way to prevent this...
+        fn breaks() -> UniqKey {
+            uniq_key!()
+        }
+        assert_eq!(breaks(), breaks());
+    }
+}

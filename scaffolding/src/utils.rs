@@ -231,8 +231,8 @@ unsafe impl<T> Send for AssumeSyncSend<T> {}
 ///     // The enum containing the flags that will be stored in [`Flags`].
 ///     bitflags FlagTypes {
 ///         // One of the bitflags, and the bit it occupies
-///         Flag1 = 0b0000_0001;
-///         Flag2 = 0b0000_0010;
+///         Flag1 = 0b0000_0001,
+///         Flag2 = 0b0000_0010,
 ///     }
 /// }
 ///

@@ -1,5 +1,5 @@
 use {
-    super::{HAlign, HorizontalOverflowStyle, Text, TextStyle, TextStyleFlags, VAlign},
+    super::{HAlign, HorizontalOverflowStyle, Text, TextStyleFlags, VAlign},
     crate::{
         input::Key,
         prelude::Terminal,

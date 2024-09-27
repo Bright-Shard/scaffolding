@@ -86,14 +86,10 @@ pub enum OsType {
 #[cfg(target_family = "unix")]
 mod unix_common;
 
-#[cfg(target_os = "linux")]
-mod linux;
-#[cfg(target_os = "linux")]
-use linux as os_impl;
-#[cfg(target_os = "macos")]
-mod mac;
-#[cfg(target_os = "macos")]
-use mac as os_impl;
+#[cfg_attr(target_os = "linux", path = "os/linux.rs")]
+#[cfg_attr(target_os = "macos", path = "os/mac.rs")]
+#[cfg_attr(target_os = "windows", path = "os/windows.rs")]
+mod os_impl;
 
 #[doc(inline)]
 /// The OS implementation of [`OsTrait`].
@@ -101,7 +97,7 @@ pub use os_impl::Os;
 
 use crate::utils;
 
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
 compile_error!("Scaffolding isn't currently supported for the operating system you're building for. Feel free to comment on or open an issue on GitHub.");
 
 /// A basic global allocator using the OS' allocate and deallocate functions.

@@ -7,7 +7,14 @@ pub mod os;
 pub mod utils;
 pub mod world;
 
-pub use ahash as _ahash;
+pub mod _hash {
+    #[cfg(feature = "ahash")]
+    pub use ahash::AHasher as Hasher;
+    #[cfg(feature = "std")]
+    pub use std::hash::DefaultHasher as Hasher;
+    #[cfg(all(not(feature = "std"), not(feature = "ahash")))]
+    compile_error!("You must enable either the `std` or `ahash` features.");
+}
 
 pub mod prelude {
     //! Reexported types you'll probably need to use Scaffolding.

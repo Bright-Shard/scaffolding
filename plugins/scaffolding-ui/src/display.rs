@@ -1,12 +1,8 @@
 //! The module for [`Display`].
 
-use {
-    platform::{Platform, PlatformTrait},
-    scaffolding::{datatypes::ArenaVec, world::World},
-};
+use scaffolding::{datatypes::ArenaVec, world::World};
 
 pub mod gfx;
-pub mod platform;
 
 /// The [`Display`] is a bridge between ScaffoldingUI and lower-level APIs for
 /// creating GUI apps. This type handles creating windows, getting user input,
@@ -14,15 +10,11 @@ pub mod platform;
 pub struct Display {
     /// All of the created windows.
     pub windows: ArenaVec<()>,
-    platform: Platform,
 }
 impl Display {
-    pub fn new(world: &mut World) -> Self {
-        let platform = Platform::new(world).expect("Failed to connect to the OS' windowing server");
-
+    pub fn new(_world: &mut World) -> Self {
         Self {
             windows: Default::default(),
-            platform,
         }
     }
 }
