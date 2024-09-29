@@ -10,7 +10,7 @@ use {
         cell::Cell,
         collections::HashSet,
         fmt::Write as _,
-        io::{stdin, stdout, Read, Write as _},
+        io::{stdout, Write as _},
         str,
         sync::atomic::{AtomicBool, Ordering},
     },
@@ -61,12 +61,10 @@ pub struct Terminal {
     pub exit: bool,
     /// The location to move the cursor to, if one was set.
     pub target_cursor_location: Cell<Option<(u16, u16)>>,
-    /// A buffer for reading text input from stdin.
-    input_buffer: Vec<u8>,
     /// The buffer for writing to stdout.
-    output_buffer: ArenaVec<u8>,
+    pub(crate) output_buffer: ArenaVec<u8>,
     /// OS APIs.
-    os: Os,
+    pub(crate) os: Os,
 }
 impl Terminal {
     pub fn set_fg(&self, fg: Option<Colour>) {
@@ -123,7 +121,6 @@ impl Terminal {
 
     pub fn update(&mut self) {
         print!("\x1B[0m\x1B[2J\x1B[H");
-        stdout().flush().unwrap();
         if let Some((x, y)) = self.target_cursor_location.take() {
             // Move cursor
             write!(&self.output_buffer, "\x1B[{};{}H", y + 1, x + 1).unwrap();
@@ -149,204 +146,7 @@ impl Terminal {
         }
         self.released_mouse_buttons.clear();
 
-        self.os.read_stdin_no_block(&mut self.input_buffer);
-        let mut stdin = self.input_buffer.iter().copied().enumerate().peekable();
-
-        while let Some((idx, byte)) = stdin.next() {
-            match byte {
-                b'\x1B' => {
-                    // Escape sequence: This is either reporting a mouse
-                    // movement or a special character
-                    let next = stdin.next();
-                    if matches!(next, Some((_, b'['))) {
-                        let Some((_, next)) = stdin.next() else {
-                            eprintln!("WARN: Received incomplete escape code from terminal");
-                            continue;
-                        };
-
-                        match next {
-                            // Mouse event
-                            b'<' => {
-                                // Format: \x1B[<, then mouse btn, then ;, then
-                                // mouse x, then ;, then mouse y, then M or m
-                                // for clicked/not clicked
-                                let mut btn = 0;
-                                for (_, byte) in &mut stdin {
-                                    if byte == b';' {
-                                        break;
-                                    }
-
-                                    btn *= 10;
-                                    btn += byte as u16 - 48;
-                                }
-                                let mut x = 0;
-                                for (_, byte) in &mut stdin {
-                                    if byte == b';' {
-                                        break;
-                                    }
-
-                                    x *= 10;
-                                    x += byte as u16 - 48;
-                                }
-
-                                let mut y = 0;
-                                let mut clicked = false;
-                                for (_, byte) in &mut stdin {
-                                    if byte == b'm' {
-                                        break;
-                                    } else if byte == b'M' {
-                                        clicked = true;
-                                        break;
-                                    }
-
-                                    y *= 10;
-                                    y += byte as u16 - 48;
-                                }
-
-                                // Mouse bits:
-                                // lowest 2 indicate mouse buttons 1-3
-                                // next 3 are modifiers shift, meta, and control
-                                // next bit indicates mouse motion
-                                // next bit is mouse buttons 4-7 (4 and 5 mean
-                                // scroll)
-                                // next bit is mouse buttons 8-11
-                                let mut button_number = btn & 0b0000_0011;
-
-                                if btn & 0b0100_0000 != 0 {
-                                    // bit for 4-7 range
-                                    button_number += 3;
-                                } else if btn & 0b1000_0000 != 0 {
-                                    // bit for 8-11 range
-                                    button_number += 7;
-                                }
-
-                                // modifier bits
-                                self.modifier_keys.shift = (btn & 0b0000_0100) != 0;
-                                self.modifier_keys.meta = (btn & 0b0000_1000) != 0;
-                                self.modifier_keys.control = (btn & 0b0001_0000) != 0;
-
-                                if button_number == 4 {
-                                    self.scroll_direction = Some(ScrollDirection::Backwards);
-                                } else if button_number == 5 {
-                                    self.scroll_direction = Some(ScrollDirection::Forwards);
-                                } else {
-                                    // -1 cause it starts indexing pixels at 1
-                                    self.mouse_pos = (x - 1, y - 1);
-                                    let btn = button_number as u8;
-                                    if clicked {
-                                        if !self.held_mouse_buttons.contains(&btn) {
-                                            self.clicked_mouse_buttons.insert(btn);
-                                        }
-                                    } else {
-                                        self.clicked_mouse_buttons.remove(&btn);
-                                        self.held_mouse_buttons.remove(&btn);
-                                        self.released_mouse_buttons.insert(btn);
-                                    }
-                                }
-                            }
-
-                            // Arrow keys
-                            b'A' => {
-                                self.pressed_keys.insert(Key::ArrowUp);
-                            }
-                            b'B' => {
-                                self.pressed_keys.insert(Key::ArrowDown);
-                            }
-                            b'C' => {
-                                self.pressed_keys.insert(Key::ArrowRight);
-                            }
-                            b'D' => {
-                                self.pressed_keys.insert(Key::ArrowLeft);
-                            }
-
-                            // Group of special keys that end with ~
-                            other if stdin.next().map(|(_, byte)| byte) == Some(b'~') => {
-                                match other {
-                                    b'5' => {
-                                        self.pressed_keys.insert(Key::PageUp);
-                                    }
-                                    b'6' => {
-                                        self.pressed_keys.insert(Key::PageDown);
-                                    }
-                                    b'1' | b'7' => {
-                                        self.pressed_keys.insert(Key::Home);
-                                    }
-                                    b'4' | b'8' => {
-                                        self.pressed_keys.insert(Key::End);
-                                    }
-                                    b'3' => {
-                                        self.pressed_keys.insert(Key::Delete);
-                                    }
-                                    _ => eprintln!(
-                                        "WARN: Unknown special key escape sequence: ESC[{}~",
-                                        other as char
-                                    ),
-                                }
-                            }
-
-                            // Home and end (note they can also be sent in the
-                            // group above)
-                            b'H' => {
-                                self.pressed_keys.insert(Key::Home);
-                            }
-                            b'F' => {
-                                self.pressed_keys.insert(Key::End);
-                            }
-                            b'O' => {
-                                let Some((_, next)) = stdin.next() else {
-                                    println!("WARN: Got incomplete control key sequence ESC[O");
-                                    continue;
-                                };
-                                match next {
-                                    b'H' => {
-                                        self.pressed_keys.insert(Key::Home);
-                                    }
-                                    b'F' => {
-                                        self.pressed_keys.insert(Key::End);
-                                    }
-                                    _ => println!(
-                                        "WARN: Unknown special key escape sequence: ESC[O{}",
-                                        next as char
-                                    ),
-                                }
-                            }
-
-                            _ => {}
-                        }
-                    } else if next.is_none() {
-                        self.pressed_keys.insert(Key::Escape);
-                    }
-                }
-                _ => {
-                    // Non-escape sequences: we're receiving a normal key
-                    // This is either ASCII (k, a) or a string from IME (か).
-
-                    // We could be receiving multiple keyboard events in this
-                    // update call, so we need to make sure we don't read an
-                    // escape character
-                    let mut len = 1;
-                    while !matches!(stdin.peek().copied(), Some((_, b'\x1B')))
-                        && stdin.peek().is_some()
-                    {
-                        stdin.next().unwrap();
-                        len += 1;
-                    }
-
-                    // Convert whatever we received to UTF-8
-                    let Ok(text) = str::from_utf8(&self.input_buffer[idx..idx + len]) else {
-                        eprintln!("WARN: Got invalid UTF-8 from the terminal");
-                        continue;
-                    };
-                    for char in text.chars() {
-                        if char == '\x7F' {
-                            self.pressed_keys.insert(Key::Backspace);
-                        } else {
-                            self.pressed_keys.insert(Key::Text(char));
-                        }
-                    }
-                }
-            }
-        }
+        Os::update(self);
     }
 
     /// Called when the [`Terminal`] is dropped, or when the program panics, to
@@ -424,7 +224,6 @@ impl Default for Terminal {
             pressed_keys: HashSet::default(),
             exit: false,
             target_cursor_location: Cell::new(None),
-            input_buffer: Vec::with_capacity(10),
             output_buffer: ArenaVec::with_reserved_memory(MemoryAmount::Megabytes(1).into_bytes()),
             os,
         }

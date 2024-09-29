@@ -130,7 +130,6 @@ impl<'a> TextInput<'a> {
                 .height(1)
                 .horizontal_overflow(HorizontalOverflowStyle::Clip)
                 .vertical_anchor(VAlign::Center)
-                .horizontal_anchor(HAlign::Left)
                 .text_style(self.text_style),
         );
 

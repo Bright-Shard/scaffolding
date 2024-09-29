@@ -74,7 +74,7 @@ impl<'a> Text<'a> {
             background_colour: None,
             vertical_anchor: VAlign::Center,
             vertical_overflow: VerticalOverflowStyle::Clip,
-            horizontal_anchor: HAlign::Center,
+            horizontal_anchor: HAlign::Left,
             horizontal_overflow: HorizontalOverflowStyle::Wrap,
             style: TextStyleFlags::default(),
         }

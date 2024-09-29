@@ -1,129 +1,90 @@
 use {
     super::OsTrait,
-    scaffolding::utils::bitflags,
-    std::{ffi::c_void, mem::MaybeUninit, ptr},
+    crate::terminal::Terminal,
+    std::{mem::MaybeUninit, ptr},
 };
 
-// region: FFI
-
-bitflags! {
-    struct ConsoleModes: u32;
-    bitflags ConsoleMode {
-        EchoInput = 0x0004,
-        InsertMode = 0x0020,
-        LineInput = 0x0002,
-        MouseInput = 0x0010,
-        ProcessedInput = 0x0001,
-        QuickEditMode = 0x0040,
-        WindowInput = 0x0008,
-        VirtualTerminalInput = 0x0200
-    }
-}
-
-#[repr(C)]
-struct Coord {
-    x: i16,
-    y: i16,
-}
-#[repr(C)]
-struct SmallRect {
-    left: i16,
-    top: i16,
-    right: i16,
-    bottom: i16,
-}
-#[repr(C)]
-struct ConsoleScreenBufferInfo {
-    size: Coord,
-    cursor_position: Coord,
-    attributes: u16,
-    window: SmallRect,
-    maximum_window_size: Coord,
-}
-
-#[repr(transparent)]
-#[derive(Clone, Copy)]
-struct Handle(*mut c_void);
-unsafe impl Sync for Handle {}
-unsafe impl Send for Handle {}
-
-#[repr(transparent)]
-#[derive(Clone, Copy)]
-struct Bool(i32);
-impl Bool {
-    fn as_bool(self) -> bool {
-        self.0 != 0
-    }
-}
-
-#[repr(u32)]
-enum StdHandle {
-    Input = -10i32 as u32,
-    Output = -11i32 as u32,
-}
-
-#[derive(PartialEq, Eq)]
-#[repr(u32)]
-enum WaitForSingleObjectResult {
-    Abandoned = 0x00000080,
-    Object0 = 0x00000000,
-    Timeout = 0x00000102,
-    Failed = u32::MAX,
-}
-
-#[link(name = "kernel32")]
-extern "C" {
-    fn GetConsoleMode(hConsoleHandle: Handle, lpMode: *mut ConsoleModes) -> Bool;
-    fn SetConsoleMode(hConsoleHandle: Handle, dwMode: ConsoleModes) -> Bool;
-    fn GetConsoleScreenBufferInfo(
-        hConsoleOutput: Handle,
-        lpConsoleScreenBufferInfo: *mut ConsoleScreenBufferInfo,
-    ) -> Bool;
-    fn GetLastError() -> u32;
-    fn GetStdHandle(nStdHandle: StdHandle) -> Handle;
-    fn GetNumberOfConsoleInputEvents(hConsoleInput: Handle, lpcNumberOfEvents: *mut u32) -> Bool;
-    fn WaitForSingleObject(hHandle: Handle, dwMilliseconds: u32) -> WaitForSingleObjectResult;
-    fn ReadFile(
-        hFile: Handle,
-        lpBuffer: *mut c_void,
-        lpNumberOfBytesToRead: u32,
-        lpNumberOfBytesRead: *mut u32,
-        lpOverlapped: *mut c_void,
-    ) -> Bool;
-}
-
-// endregion
+#[path = "windows/ffi.rs"]
+mod ffi;
+use ffi::*;
 
 #[derive(Clone)]
 pub struct Os {
-    /// The original console mode, before we enable raw mode. We store it so we
-    /// can reset to this mode later.
-    og_console_mode: ConsoleModes,
+    /// The original console mode for stdin, before we enable raw mode. We
+    /// store it so we can reset to this mode later.
+    stdin_og_mode: ConsoleModes,
+    /// Same as [`Os::stdin_og_mode`], but for stdout.
+    stdout_og_mode: ConsoleModes,
     /// A handle for stdin.
     stdin_handle: Handle,
     /// A handle for stdout.
     stdout_handle: Handle,
+    /// A buffer for reading from the console.
+    input_buffer: Vec<InputRecord>,
 }
 impl Default for Os {
     fn default() -> Self {
         let stdin_handle = unsafe { GetStdHandle(StdHandle::Input) };
         let stdout_handle = unsafe { GetStdHandle(StdHandle::Output) };
 
-        let mut og_console_mode = MaybeUninit::uninit();
-        let res = unsafe { GetConsoleMode(stdin_handle, og_console_mode.as_mut_ptr()) };
+        let mut stdin_og_mode = MaybeUninit::uninit();
+        let res = unsafe { GetConsoleMode(stdin_handle, stdin_og_mode.as_mut_ptr()) };
         if !res.as_bool() {
             panic!(
-                "scaffolding-tui: Failed to get current console's mode. Error code: {}",
+                "scaffolding-tui: Failed to get current console's stdout mode. Error code: {}",
                 unsafe { GetLastError() }
             );
         }
+        let stdin_og_mode = unsafe { stdin_og_mode.assume_init() };
 
-        let og_console_mode = unsafe { og_console_mode.assume_init() };
+        let mut stdout_og_mode = MaybeUninit::uninit();
+        let res = unsafe { GetConsoleMode(stdout_handle, stdout_og_mode.as_mut_ptr()) };
+        if !res.as_bool() {
+            panic!(
+                "scaffolding-tui: Failed to get current console's stdin mode. Error code: {}",
+                unsafe { GetLastError() }
+            );
+        }
+        let stdout_og_mode = unsafe { stdout_og_mode.assume_init() };
 
         Self {
-            og_console_mode,
+            stdin_og_mode,
+            stdout_og_mode,
             stdin_handle,
             stdout_handle,
+            input_buffer: Vec::default(),
+        }
+    }
+}
+impl Os {
+    fn read_input(&mut self) {
+        let mut num_events = 0u32;
+        let res = unsafe { GetNumberOfConsoleInputEvents(self.stdin_handle, &mut num_events) };
+
+        if !res.as_bool() {
+            panic!("scaffolding-tui::os::windows::Os::update: GetNumberOfConsoleInputEvents call had an error. Error code: {}", unsafe { GetLastError() });
+        }
+
+        self.input_buffer.clear();
+
+        if num_events > 0 {
+            self.input_buffer.reserve(num_events as usize);
+
+            let mut events_read = 0u32;
+            let res = unsafe {
+                ReadConsoleInputW(
+                    self.stdin_handle,
+                    self.input_buffer.as_mut_ptr(),
+                    num_events,
+                    &mut events_read,
+                )
+            };
+
+            if !res.as_bool() {
+                panic!("scaffolding-tui::os::windows::Os::update: ReadConsoleInput call had an error. Error code: {}", unsafe { GetLastError() });
+            }
+
+            unsafe { self.input_buffer.set_len(events_read as usize) };
         }
     }
 }
@@ -148,44 +109,58 @@ impl OsTrait for Os {
             let res = unsafe {
                 SetConsoleMode(
                     self.stdin_handle,
-                    ConsoleMode::MouseInput | ConsoleMode::VirtualTerminalInput,
+                    ConsoleMode::MouseInput
+                        | ConsoleMode::ProcessedInput
+                        | ConsoleMode::WindowInput
+                        // This isn't documented, but mouse input breaks without
+                        // this flag.
+                        | ConsoleMode::ExtendedFlags,
                 )
             };
+            if !res.as_bool() {
+                panic!("scaffolding-tui::os::windows::Os::set_raw_mode: SetConsoleMode on stdin call had an error. Error code: {}", unsafe { GetLastError() });
+            }
 
+            let res = unsafe {
+                SetConsoleMode(
+                    self.stdout_handle,
+                    // means ProcessedOutput for stdout
+                    ConsoleMode::ProcessedInput
+                        // means VirtualTerminalProcessing for stdout
+                        | ConsoleMode::EchoInput,
+                )
+            };
+            if !res.as_bool() {
+                panic!("scaffolding-tui::os::windows::Os::set_raw_mode: SetConsoleMode on stdin call had an error. Error code: {}", unsafe { GetLastError() });
+            }
+        } else {
+            let res = unsafe { SetConsoleMode(self.stdin_handle, self.stdin_og_mode) };
             if !res.as_bool() {
                 panic!("scaffolding-tui::os::windows::Os::set_raw_mode: SetConsoleMode call had an error. Error code: {}", unsafe { GetLastError() });
             }
-        } else {
-            let res = unsafe { SetConsoleMode(self.stdin_handle, self.og_console_mode) };
-
+            let res = unsafe { SetConsoleMode(self.stdout_handle, self.stdout_og_mode) };
             if !res.as_bool() {
                 panic!("scaffolding-tui::os::windows::Os::set_raw_mode: SetConsoleMode call had an error. Error code: {}", unsafe { GetLastError() });
             }
         }
     }
-    fn read_stdin_no_block(&self, buffer: &mut Vec<u8>) {
-        buffer.clear();
+    fn update(terminal: &mut Terminal) {
+        terminal.os.read_input();
 
-        let mut byte = 0u8;
-        while unsafe { WaitForSingleObject(self.stdin_handle, 0) }
-            == WaitForSingleObjectResult::Object0
-        {
-            println!("pre-read");
-            let res = unsafe {
-                ReadFile(
-                    self.stdin_handle,
-                    &mut byte as *mut u8 as *mut c_void,
-                    1,
-                    ptr::null_mut(),
-                    ptr::null_mut(),
-                )
-            };
-            if !res.as_bool() {
-                panic!("scaffolding-tui::os::windows::Os::read_stdin_no_block: ReadFile call had an error. Error code: {}", unsafe { GetLastError() });
+        for input in terminal.os.input_buffer.drain(..) {
+            match input.event_type {
+                EventType::Key => {
+                    let key_event = unsafe { input.event.key_event };
+                }
+                EventType::Mouse => {
+                    let mouse_event = unsafe { input.event.mouse_event };
+                    terminal.mouse_pos = (
+                        mouse_event.mouse_position.x.try_into().unwrap(),
+                        mouse_event.mouse_position.y.try_into().unwrap(),
+                    );
+                }
+                _ => {}
             }
-            println!("post-read");
-
-            buffer.push(byte);
         }
     }
 }

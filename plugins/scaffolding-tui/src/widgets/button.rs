@@ -83,7 +83,8 @@ impl<'a> Button<'a> {
                 .horizontal_overflow(HorizontalOverflowStyle::Clip)
                 .frame(self.frame)
                 .text_colour(self.text_colour)
-                .background_colour(self.background_colour),
+                .background_colour(self.background_colour)
+                .horizontal_anchor(HAlign::Center),
         );
 
         let hovered = self.hovered(terminal);

@@ -86,7 +86,6 @@ impl<'a> Checkbox<'a> {
                         .y(self.frame.y)
                         .width(self.frame.width.saturating_sub(2))
                         .height(1)
-                        .horizontal_anchor(HAlign::Left)
                         .horizontal_overflow(HorizontalOverflowStyle::ClipWithChar('…')),
                 );
             }

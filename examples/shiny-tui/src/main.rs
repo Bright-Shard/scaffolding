@@ -39,15 +39,22 @@ fn app(app: &App, terminal: &Singleton<Terminal>, uniqs: &Uniqs) {
             .y(6)
             .height(1)
             .width(60)
-            .horizontal_anchor(HAlign::Left)
             .horizontal_overflow(HorizontalOverflowStyle::Clip),
     );
     app.draw(
-        Text::new(&*text_input_buffer)
+        Text::new(&format!("Mouse position: {:?}", terminal.mouse_pos))
             .x(0)
             .y(7)
             .height(1)
-            .horizontal_anchor(HAlign::Left)
+            .width(60)
+            .horizontal_overflow(HorizontalOverflowStyle::Clip),
+    );
+    app.draw(
+        Text::new(&format!("Window size: {:?}", terminal.size))
+            .x(0)
+            .y(8)
+            .height(1)
+            .width(60)
             .horizontal_overflow(HorizontalOverflowStyle::Clip),
     );
 
@@ -63,7 +70,7 @@ fn app(app: &App, terminal: &Singleton<Terminal>, uniqs: &Uniqs) {
     .for_each(|(idx, border)| {
         terminal.draw(Border {
             x: idx as u16 * 7,
-            y: 8,
+            y: 10,
             width: 7,
             height: 7,
             style: border,
