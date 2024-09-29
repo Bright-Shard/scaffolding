@@ -3,35 +3,23 @@ use {
     crate::utils::bitflags,
     core::{
         alloc::Layout,
-        cell::LazyCell,
         ffi::c_void,
         mem::MaybeUninit,
         ptr::{self, NonNull},
     },
 };
 
-#[cfg(not(feature = "std"))]
-compile_error!("Scaffolding on Windows requires the standard library.");
-
-thread_local! {
-    static SYSTEM_INFO: LazyCell<SystemInfo> = const {
-        LazyCell::new(|| {
-            let mut sysinfo = MaybeUninit::uninit();
-            unsafe {
-                GetSystemInfo(sysinfo.as_mut_ptr());
-            }
-            unsafe { sysinfo.assume_init() }
-        })
-    };
-}
-
 pub struct Os;
 
 impl OsTrait for Os {
-    const TYPE: OsType = OsType::Linux;
+    const TYPE: OsType = OsType::Windows;
 
     fn page_size() -> usize {
-        SYSTEM_INFO.with(|sysinfo| sysinfo.page_size as usize)
+        let mut sysinfo = MaybeUninit::uninit();
+        unsafe {
+            GetSystemInfo(sysinfo.as_mut_ptr());
+        }
+        unsafe { sysinfo.assume_init() }.page_size as usize
     }
 
     fn reserve(amount: usize) -> Option<NonNull<c_void>> {
@@ -121,16 +109,15 @@ bitflags! {
     bitflags AllocationType {
         Commit = 0x00001000,
         Reserve = 0x00002000,
-        Reset = 0x00080000,
     }
 }
 bitflags! {
     struct MemoryProtectionType: u32;
     bitflags MemoryProtection {
-        Execute = 0x10,
-        ExecuteRead = 0x20,
-        ExecuteReadWrite = 0x40,
-        ReadyOnly = 0x02,
+        // Execute = 0x10,
+        // ExecuteRead = 0x20,
+        // ExecuteReadWrite = 0x40,
+        // ReadyOnly = 0x02,
         ReadWrite = 0x04
     }
 }

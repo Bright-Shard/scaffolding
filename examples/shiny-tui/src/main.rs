@@ -11,7 +11,10 @@ fn main() {
 }
 
 fn app(app: &App, terminal: &Singleton<Terminal>, uniqs: &Uniqs) {
-    app.draw(TextInput::new(uniqs.get(uniq_key!()), uniq_key!()).placeholder("Text box"));
+    let frames: &mut u128 = uniqs.get(uniq_key!());
+
+    let text_input_buffer = uniqs.get(uniq_key!());
+    app.draw(TextInput::new(text_input_buffer, uniq_key!()).placeholder("Text box"));
 
     let btn = app.draw(Button::new("button :D").x(11).width(15).height(3));
     app.draw(Button::new("Tol button :D").x(27).width(20).height(5));
@@ -30,6 +33,23 @@ fn app(app: &App, terminal: &Singleton<Terminal>, uniqs: &Uniqs) {
             .horizontal_overflow(HorizontalOverflowStyle::Clip)
             .text_style(TextStyle::Blinking | TextStyle::Underline),
     );
+    app.draw(
+        Text::new(format!("Frames: {frames}").as_str())
+            .x(15)
+            .y(6)
+            .height(1)
+            .width(60)
+            .horizontal_anchor(HAlign::Left)
+            .horizontal_overflow(HorizontalOverflowStyle::Clip),
+    );
+    app.draw(
+        Text::new(&*text_input_buffer)
+            .x(0)
+            .y(7)
+            .height(1)
+            .horizontal_anchor(HAlign::Left)
+            .horizontal_overflow(HorizontalOverflowStyle::Clip),
+    );
 
     [
         BorderStyle::ASCII,
@@ -43,7 +63,7 @@ fn app(app: &App, terminal: &Singleton<Terminal>, uniqs: &Uniqs) {
     .for_each(|(idx, border)| {
         terminal.draw(Border {
             x: idx as u16 * 7,
-            y: 7,
+            y: 8,
             width: 7,
             height: 7,
             style: border,
@@ -53,4 +73,6 @@ fn app(app: &App, terminal: &Singleton<Terminal>, uniqs: &Uniqs) {
     if terminal.pressed_keys.contains(&Key::Escape) {
         app.exit();
     }
+
+    *frames += 1;
 }

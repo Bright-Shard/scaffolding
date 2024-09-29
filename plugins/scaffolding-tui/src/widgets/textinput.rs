@@ -127,6 +127,7 @@ impl<'a> TextInput<'a> {
                 .frame(self.frame)
                 .x(self.frame.x + text_offset)
                 .y(self.frame.y + text_offset)
+                .height(1)
                 .horizontal_overflow(HorizontalOverflowStyle::Clip)
                 .vertical_anchor(VAlign::Center)
                 .horizontal_anchor(HAlign::Left)

@@ -12,6 +12,10 @@ pub trait OsTrait {
 
     /// The size of a single memory page in this OS.
     fn page_size() -> usize;
+    /// Align a number to the OS' page size.
+    fn page_align(num: usize) -> usize {
+        utils::align(num, Self::page_size())
+    }
 
     /// Reserve `amount` bytes of virtual memory. This shouldn't allocate
     /// an memory, but instead just reserve virtual addresses to be
@@ -51,34 +55,12 @@ pub trait OsTrait {
     unsafe fn deallocate(ptr: NonNull<c_void>, amount: usize);
 }
 
-/// Miscellaneous OS information.
-pub struct OsMetadata {
-    /// The size of a single memory page on this OS.
-    pub page_size: usize,
-}
-impl OsMetadata {
-    /// Which OS this program is running on.
-    pub const TYPE: OsType = Os::TYPE;
-
-    /// Align a number to the OS' page size.
-    #[inline(always)]
-    pub fn page_align(&self, num: usize) -> usize {
-        utils::align(num, self.page_size)
-    }
-}
-impl Default for OsMetadata {
-    fn default() -> Self {
-        Self {
-            page_size: Os::page_size(),
-        }
-    }
-}
-
 /// A list of operating systems supported by Scaffolding. The current operating
 /// system is stored in [`Os::TYPE`] and [`OsMetadata::TYPE`].
 pub enum OsType {
     Linux,
     MacOS,
+    Windows,
 }
 
 // OS implementations

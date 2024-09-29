@@ -2,7 +2,7 @@
 
 use {
     crate::{
-        os::{Os, OsMetadata, OsTrait},
+        os::{Os, OsTrait},
         utils::MemoryAmount,
     },
     core::{
@@ -120,7 +120,7 @@ impl<T> ArenaVec<T> {
             panic!("Attempted to create an ArenaVec with less reserved memory than allocated capacity.");
         }
 
-        let reserved_memory = OsMetadata::default().page_align(reserved_memory);
+        let reserved_memory = Os::page_align(reserved_memory);
         let buffer = Os::reserve(reserved_memory).unwrap();
 
         unsafe {
@@ -164,7 +164,7 @@ impl<T> ArenaVec<T> {
             } else {
                 self.reserved_memory - used_memory
             };
-            let growth_amount = OsMetadata::default().page_align(growth_amount);
+            let growth_amount = Os::page_align(growth_amount);
 
             if used_memory + growth_amount > self.reserved_memory {
                 // rip bozo
@@ -196,7 +196,7 @@ impl<T> ArenaVec<T> {
             } else {
                 self.reserved_memory - used_memory
             };
-            let growth_amount = OsMetadata::default().page_align(growth_amount);
+            let growth_amount = Os::page_align(growth_amount);
 
             if used_memory + growth_amount > self.reserved_memory {
                 // rip bozo

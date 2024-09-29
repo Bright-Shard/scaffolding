@@ -1,5 +1,10 @@
 use {
-    crate::{input::*, os, shapes::Shape, Colour},
+    crate::{
+        input::*,
+        os::{Os, OsTrait as _},
+        shapes::Shape,
+        Colour,
+    },
     scaffolding::{datatypes::ArenaVec, utils::MemoryAmount},
     std::{
         cell::Cell,
@@ -56,10 +61,12 @@ pub struct Terminal {
     pub exit: bool,
     /// The location to move the cursor to, if one was set.
     pub target_cursor_location: Cell<Option<(u16, u16)>>,
-    /// The buffer for reading from stdin.
+    /// A buffer for reading text input from stdin.
     input_buffer: Vec<u8>,
     /// The buffer for writing to stdout.
     output_buffer: ArenaVec<u8>,
+    /// OS APIs.
+    os: Os,
 }
 impl Terminal {
     pub fn set_fg(&self, fg: Option<Colour>) {
@@ -130,33 +137,11 @@ impl Terminal {
         stdout().flush().unwrap();
         self.output_buffer.clear();
 
-        os::set_blocking(false);
-
         // Get terminal size
-        self.size = os::get_terminal_size();
+        self.size = self.os.terminal_size();
 
         // Clear old user input
         self.pressed_keys.clear();
-
-        // Handle user input
-        self.input_buffer.resize(10, 0);
-        let mut bytes_read = 0;
-        loop {
-            if let Ok(new_bytes_read) = stdin().read(&mut self.input_buffer[bytes_read..]) {
-                bytes_read += new_bytes_read;
-            } else {
-                break;
-            }
-
-            if bytes_read < self.input_buffer.len() {
-                break;
-            }
-
-            self.input_buffer.reserve(self.input_buffer.len());
-            for _ in 0..self.input_buffer.len() {
-                self.input_buffer.push(0);
-            }
-        }
 
         // Progress mouse button states
         for btn in self.clicked_mouse_buttons.drain() {
@@ -164,7 +149,7 @@ impl Terminal {
         }
         self.released_mouse_buttons.clear();
 
-        self.input_buffer.truncate(bytes_read);
+        self.os.read_stdin_no_block(&mut self.input_buffer);
         let mut stdin = self.input_buffer.iter().copied().enumerate().peekable();
 
         while let Some((idx, byte)) = stdin.next() {
@@ -182,9 +167,9 @@ impl Terminal {
                         match next {
                             // Mouse event
                             b'<' => {
-                                // Format: \x1B[<, then mouse btn, then ;, then mouse x,
-                                // then ;, then mouse y, then M or m for clicked/not
-                                // clicked
+                                // Format: \x1B[<, then mouse btn, then ;, then
+                                // mouse x, then ;, then mouse y, then M or m
+                                // for clicked/not clicked
                                 let mut btn = 0;
                                 for (_, byte) in &mut stdin {
                                     if byte == b';' {
@@ -222,7 +207,8 @@ impl Terminal {
                                 // lowest 2 indicate mouse buttons 1-3
                                 // next 3 are modifiers shift, meta, and control
                                 // next bit indicates mouse motion
-                                // next bit is mouse buttons 4-7 (4 and 5 mean scroll)
+                                // next bit is mouse buttons 4-7 (4 and 5 mean
+                                // scroll)
                                 // next bit is mouse buttons 8-11
                                 let mut button_number = btn & 0b0000_0011;
 
@@ -361,13 +347,11 @@ impl Terminal {
                 }
             }
         }
-
-        os::set_blocking(true);
     }
 
     /// Called when the [`Terminal`] is dropped, or when the program panics, to
     /// reset the terminal & undo all the things Scaffolding changed.
-    pub fn on_drop() {
+    pub fn on_drop(os: &Os) {
         // Running this code twice can cause weird terminal issues
         if TERMINAL_DROPPED.swap(true, Ordering::Release) {
             return;
@@ -387,12 +371,14 @@ impl Terminal {
         stdout().write_all(FINAL_COMMANDS.as_bytes()).unwrap();
         stdout().flush().unwrap();
 
-        os::set_raw_mode(false);
+        os.set_raw_mode(false);
     }
 }
 impl Default for Terminal {
     fn default() -> Self {
-        os::set_raw_mode(true);
+        let os = Os::default();
+
+        os.set_raw_mode(true);
 
         const INITIAL_COMMANDS: &str = concat!(
             // UTF-8 character set
@@ -421,8 +407,9 @@ impl Default for Terminal {
         // and then we leave the alternate buffer when Terminal is dropped,
         // so the message can't be seen.
         let normal_panic_handler = std::panic::take_hook();
+        let os2 = os.clone();
         std::panic::set_hook(Box::new(move |panic_info| {
-            Terminal::on_drop();
+            Terminal::on_drop(&os2);
             normal_panic_handler(panic_info);
         }));
 
@@ -439,11 +426,12 @@ impl Default for Terminal {
             target_cursor_location: Cell::new(None),
             input_buffer: Vec::with_capacity(10),
             output_buffer: ArenaVec::with_reserved_memory(MemoryAmount::Megabytes(1).into_bytes()),
+            os,
         }
     }
 }
 impl Drop for Terminal {
     fn drop(&mut self) {
-        Self::on_drop();
+        Self::on_drop(&self.os);
     }
 }

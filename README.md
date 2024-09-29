@@ -19,16 +19,9 @@ Scaffolding is meant to be a series of tools for developing apps, instead of jus
 
 # Platform Support
 
-Scaffolding is currently only being developed on macOS and Linux. By the time it's released, it will support macOS, Linux, Windows, iOS, and Android.
+Scaffolding supports macOS, Linux, and Windows. It will also support iOS and Android in the future, but desktop is the main priority at the moment.
 
-## Adding Support for New Operating Systems
-
-The `OsTrait` trait in `scaffolding::os` defines all of the OS functions Scaffolding relies on. It basically comes down to a few memory allocation functions. New operating systems just need to create an empty `Os` struct that implements `OsTrait` for Scaffolding to work correctly.
-
-Scaffolding can be ported to any operating system with the following features:
-- **Memory Allocation**: Scaffolding relies on a heap to store its app data.
-- **Virtual Memory**: Scaffolding's `arenavec` type relies on virtual memory to guarantee that it will never move in memory. Most modern systems have memory paging, which provides virtual memory.
-- **Atomics**: Scaffolding relies on atomic booleans for lazy loading and atomic pointers for multithreading.
+After mobile support is added, Scaffolding may also add support for more niche OSes, like Redox.
 
 # Project Status & Roadmap
 
